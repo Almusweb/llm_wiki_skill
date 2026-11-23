@@ -2,7 +2,7 @@
 
 Base URL: `http://127.0.0.1:19828` (default; the listen address can change, see "Listen address" below)
 Prefix:   `/api/v1`
-Default content type: `application/json; charset=utf-8` (0.6.13 sends `application/json` without `charset`; the body is UTF-8)
+Default content type: `application/json`
 
 Except `/health`, every endpoint requires the token, sent in one of these forms:
 
@@ -76,14 +76,13 @@ Field reference:
       "current": false
     }
   ],
-  "currentProject": { "id": "a0e90b29-...", "name": "Research Notes", "path": "...", "current": true }
+  "currentProject": { "id": "a0e90b29-fcf3-4364-9502-8bd1272de820", "name": "Research Notes", "path": "/Users/me/wiki-projects/research", "current": true }
 }
 ```
 
-`currentProject` is a 0.6.13 addition. The list contains **every** project the app knows, including ones
-unrelated to the user's current work. Paths use forward slashes on Windows (`C:/...`).
+`currentProject` is a 0.6.13 addition and belongs to this response, not to `/health`. The list can hold several projects: work only on the ones the user means. Paths use forward slashes on Windows (`C:/...`).
 
-The `current` flag marks the project that is currently open in the desktop UI. Use it when the user doesn't name a project explicitly; in scripts resolve it once and use the UUID, because `current` follows whatever the UI opens.
+The `current` flag is true for the project the desktop UI has set as current; the literal `current` in `{id}` resolves to that project. Use it when the user doesn't name a project explicitly.
 
 `{id}` placeholder in every project-scoped endpoint accepts:
 
@@ -126,10 +125,10 @@ curl.exe -s -H "Authorization: Bearer $env:LLM_WIKI_API_TOKEN" `
   "$env:BASE/api/v1/projects/$projectPath/files?root=wiki"
 ```
 
-**Windows path notes** (0.6.13, `api_server.rs` 855-896):
+**Path-as-`{id}` notes** (0.6.13):
 
-- Backslashes are normalized to forward slashes, and on Windows the comparison is **case-insensitive**. The upstream advice "preserve case, use only `/`" is not needed on 0.6.13.
-- The path segment is split on `/` before decoding, so `/` **must** be encoded as `%2F`; the drive-letter colon is harmless (encoding it as `%3A` also works). `EscapeDataString` / `jq @uri` / `encodeURIComponent` do both.
+- On Windows the match against the project path does not distinguish letter case and accepts `\`.
+- The path segment is split on `/` before it is decoded, so a `/` in the id must be sent as `%2F`. A colon is not a separator. `%XX` is decoded everywhere in the segment, `+` becomes a space and `?` ends the path. `EscapeDataString` / `jq @uri` / `encodeURIComponent` encode `/` as `%2F`.
 - If you get 404, fall back to `GET /api/v1/projects`, find the project there, and use its `id` (UUID) — UUIDs are platform-agnostic and never need encoding.
 
 If the path isn't registered in the desktop app, you'll get **404** — fall back to listing and asking.
@@ -146,7 +145,7 @@ Query params:
 |---|---|---|
 | `root` | `wiki` | One of `wiki` / `sources` (alias `raw`, `raw/sources`) / `all`; anything else → 400. `wiki` and `sources` list the folder's **content** (no container node); `all` returns 4 entries: `purpose.md`, `schema.md`, `wiki`, `sources`. |
 | `recursive` | `true` | `false` → only one level (directories then have `size` and `children` = `null`). Any value other than `false` counts as `true`. |
-| `maxFiles` | `2000` | Clamped to `[1, 10000]` (`0` → 1, non-numeric → default). Exceed → **413** `"File listing exceeds maxFiles limit (N)"`; the list is never returned truncated and `truncated` stays `false`. |
+| `maxFiles` | `2000` | Clamped to `[1, 10000]` (`0` → 1, non-numeric → default). Exceed → **413** `"File listing exceeds maxFiles limit (N)"`. |
 
 Response:
 
@@ -171,8 +170,7 @@ Response:
         }
       ]
     }
-  ],
-  "truncated": false
+  ]
 }
 ```
 
@@ -192,7 +190,7 @@ Query params:
 
 | Param | Required | Notes |
 |---|---|---|
-| `path` | yes | Project-relative. Allow-list: `purpose.md`, `schema.md`, `wiki/**`, `raw/sources/**`. No dotfile segments. No `..`. On 0.6.13 a leading `/`, backslashes and a different letter case are also accepted. Readable extensions: md, mdx, txt, csv, json, yaml, yml, xml, html, htm, log — **not** rtf. |
+| `path` | yes | Project-relative. Allow-list: `purpose.md`, `schema.md`, `wiki/**`, `raw/sources/**`. No dotfile segments. No `..`. Readable extensions: md, mdx, txt, csv, json, yaml, yml, xml, html, htm, log. `rtf` is not readable (415). |
 
 Response:
 
@@ -211,7 +209,7 @@ Failure modes:
 - `403` — path outside the allow-list (e.g., `../app-state.json`, `.llm-wiki/foo.json`, encoded `..`, directories, dotfiles, empty `path=`)
 - `404` — file does not exist (the message includes the OS error text)
 - `413` — file > 2 MB
-- `415` — file is binary / non-UTF-8 (e.g., PNG, PDF). Use the desktop UI to view; the API is text-only.
+- `415` — file is binary / non-UTF-8 (e.g., PNG, PDF), or its extension is not in the readable list (e.g., `rtf`). Use the desktop UI to view; the API is text-only.
 
 Check order on 0.6.13: 403 scope → 415 extension → 404 → 413 size → 415 not UTF-8.
 

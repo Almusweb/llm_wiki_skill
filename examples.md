@@ -17,8 +17,8 @@ The bash + `curl` + `jq` snippets below are written for **macOS / Linux**. On **
 
 **Paths on Windows**:
 
-- Prefer **forward slashes** in API request paths (`wiki/concepts/foo.md`). On 0.6.13 backslashes and a different letter case are also accepted by `files/content`, but the forward-slash form is the one the API returns.
-- When using a Windows filesystem path as `{id}` (e.g. `C:/Users/me/wiki`), percent-encode it: the `/` **must** become `%2F` (the colon is harmless). `EscapeDataString` / `encodeURIComponent` / `jq @uri` do this correctly.
+- Prefer **forward slashes** in API request paths (`wiki/concepts/foo.md`).
+- When using a Windows filesystem path as `{id}` (e.g. `C:/Users/me/wiki`), percent-encode it: the `/` **must** become `%2F`; a colon needs no encoding. `EscapeDataString` / `encodeURIComponent` / `jq @uri` do this correctly.
 - If a path-as-id call returns 404 on Windows, fall back to `GET /api/v1/projects` and use the project's UUID — UUIDs are platform-agnostic and don't need encoding.
 
 If you're calling from JavaScript / Python / Go / any other language with a real HTTP client (`fetch`, `requests`, `httpx`, `net/http`), platform doesn't matter — just `encodeURIComponent` or its equivalent and forget the shell quirks.
@@ -126,7 +126,7 @@ curl -s -H "Authorization: Bearer $TOKEN" \
   "$BASE/api/v1/projects/current/files?root=wiki&recursive=true&maxFiles=500"
 ```
 
-Summarize the directory structure (`concepts/`, `entities/`, `sources/`…) and rough page counts per category. If the wiki has more entries than `maxFiles`, the call fails with **413** instead of returning a partial tree: raise `maxFiles` (up to 10000). On 0.6.13 each `path` is absolute (`//?/C:/...` on Windows): strip the project path before passing it to `files/content`.
+Summarize the directory structure (`concepts/`, `entities/`, `sources/`…) and rough page counts per category. If the wiki has more entries than `maxFiles`, the call fails with **413**: raise `maxFiles` (up to 10000). On 0.6.13 each `path` is absolute (`//?/C:/...` on Windows): strip the project path before passing it to `files/content`.
 
 **Topical overview** — read the curated index:
 
@@ -201,7 +201,7 @@ When the user names a specific project rather than implying the active one.
    }
    ```
 
-   The list can include projects unrelated to the user's request: match only what the user named.
+   The list can hold several projects: match only the one the user named.
 
 2. Match the user's spoken name. Case-insensitive substring on `name`:
 

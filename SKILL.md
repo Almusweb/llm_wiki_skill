@@ -117,12 +117,12 @@ Don't apply a fixed score threshold across modes. Rely on relative gaps within o
 
 | Form | When to use | Example |
 |---|---|---|
-| `current` (literal) | Default for "my wiki / 我的知识库 / this project / this wiki". It resolves to whatever is open in the desktop UI right now, so it can change between calls. In scripts, resolve once and use the UUID. | `/api/v1/projects/current/search` |
+| `current` (literal) | Default for "my wiki / 我的知识库 / this project / this wiki". It resolves to the project with `current: true`, which the desktop UI sets. | `/api/v1/projects/current/search` |
 | UUID | The user pasted a project ID, OR you previously resolved a name to an ID and want to re-use it. | `/api/v1/projects/a0e90b29-fcf3-4364-9502-8bd1272de820/files` |
-| Absolute filesystem path (URL-encoded) | The user named the path (e.g. `~/notes/research`). Useful when the user has multiple projects with similar names. Only `/` needs encoding (`%2F`); on Windows the match is case-insensitive and `\` is accepted. | `/api/v1/projects/%2FUsers%2Fme%2Fwiki%2Fresearch/files` |
+| Absolute filesystem path (URL-encoded) | The user named the path (e.g. `~/notes/research`). Useful when the user has multiple projects with similar names. A `/` in the path must be sent as `%2F`. On Windows the match does not distinguish letter case and accepts `\`. | `/api/v1/projects/%2FUsers%2Fme%2Fwiki%2Fresearch/files` |
 | Project name | **Not supported directly** (404). You must `GET /api/v1/projects` first, find a match by `name`, then use that project's `id`. |
 
-`GET /projects` lists **every** project known to the app, including unrelated ones, plus a top-level `currentProject` object. Work only on the projects the user means.
+`GET /projects` lists the projects, which can be more than one, plus a top-level `currentProject` object. Work only on the projects the user means.
 
 **Decision tree** for what the user said:
 
@@ -166,8 +166,8 @@ For "I added new docs" requests:
 |---|---|---|
 | GET | `/api/v1/health` | No auth. Returns `{ ok, status, version, enabled, authRequired, authConfigured, allowUnauthenticated, tokenSource }`; 0.6.13 adds `mcpEnabled`, `allowLanAccess`, `agent`. |
 | GET | `/api/v1/projects` | List projects. Each: `{ id, name, path, current }`; 0.6.13 adds top-level `currentProject`. |
-| GET | `/api/v1/projects/{id}/files?root=wiki\|sources\|all&recursive=true&maxFiles=2000` | Tree of `{ name, path, isDir, size, children }`. On 0.6.13 `path` is **absolute** (on Windows `//?/C:/...`): strip the project path to get the relative path for `files/content`. Exceeding `maxFiles` → **413** (not a truncated list; `truncated` stays `false`). Capped at 10000 nodes. |
-| GET | `/api/v1/projects/{id}/files/content?path=wiki/foo.md` | Text files only: md/mdx/txt/json/yaml/yml/csv/html/htm/xml/log (**not** rtf). 2 MB max. 400 if `path` is missing, 403 on out-of-scope path (also `.llm-wiki/`, `..`, dot-segments, directories), 415 on binary, 413 on oversize. |
+| GET | `/api/v1/projects/{id}/files?root=wiki\|sources\|all&recursive=true&maxFiles=2000` | `root`: `wiki`, `sources` (alias `raw`, `raw/sources`) or `all`. Tree of `{ name, path, isDir, size, children }`. On 0.6.13 `path` is **absolute** (on Windows `//?/C:/...`): strip the project path to get the relative path for `files/content`. Exceeding `maxFiles` → **413**. Capped at 10000 nodes. |
+| GET | `/api/v1/projects/{id}/files/content?path=wiki/foo.md` | Text files only: md, mdx, txt, csv, json, yaml, yml, xml, html, htm, log. `rtf` is not readable (415). 2 MB max. 400 if `path` is missing, 403 on out-of-scope path (also `.llm-wiki/`, `..`, dot-segments, directories), 415 on binary, 413 on oversize. |
 | POST | `/api/v1/projects/{id}/search` | Body: `{ "query": "...", "topK": 10, "includeContent": false }` (`limit` is ignored). Keyword + one-hop graph candidates, plus vectors when embeddings are configured; see "Reading the score". Response: `mode`, `tokenHits`, `vectorHits`, `graphHits`, `results`. `content` is absent (not `null`) unless `includeContent: true`. Empty query → 400. |
 | GET | `/api/v1/projects/{id}/graph?q=&nodeType=&limit=200&offset=0&edgeScope=page` | Graph from `wiki/**/*.md` wikilinks and `related:`. `limit` 1–1000 (larger is clamped, 0/negative → 400). **0.6.13+:** `offset` (≥ 0) and `edgeScope` (`page` \| `filtered`) for pagination; response adds `offset`, `limit`, `totalCount`, `hasMore`. |
 | POST | `/api/v1/projects/{id}/sources/rescan` | Triggers a backend rescan using the user's Source Watch config. Returns post-rescan queue + changed tasks. Does **not** itself queue ingest: see `api-reference.md`. |
