@@ -17,8 +17,8 @@ The bash + `curl` + `jq` snippets below are written for **macOS / Linux**. On **
 
 **Paths on Windows**:
 
-- Always pass **forward slashes** in API request paths (`wiki/concepts/foo.md`, never `wiki\concepts\foo.md`). The server stores and accepts the forward-slash form.
-- When using a Windows filesystem path as `{id}` (e.g. `C:/Users/me/wiki`), percent-encode the **colon** (`C%3A/Users/me/wiki`). `EscapeDataString` / `encodeURIComponent` / `jq @uri` all do this correctly.
+- Prefer **forward slashes** in API request paths (`wiki/concepts/foo.md`). On 0.6.13 backslashes and a different letter case are also accepted by `files/content`, but the forward-slash form is the one the API returns.
+- When using a Windows filesystem path as `{id}` (e.g. `C:/Users/me/wiki`), percent-encode it: the `/` **must** become `%2F` (the colon is harmless). `EscapeDataString` / `encodeURIComponent` / `jq @uri` do this correctly.
 - If a path-as-id call returns 404 on Windows, fall back to `GET /api/v1/projects` and use the project's UUID — UUIDs are platform-agnostic and don't need encoding.
 
 If you're calling from JavaScript / Python / Go / any other language with a real HTTP client (`fetch`, `requests`, `httpx`, `net/http`), platform doesn't matter — just `encodeURIComponent` or its equivalent and forget the shell quirks.
@@ -30,7 +30,7 @@ If you're calling from JavaScript / Python / Go / any other language with a real
 The single most common ask. Workflow:
 
 1. `POST /api/v1/projects/current/search` with `{ query: X, topK: 5, includeContent: true }`
-2. **Inspect `mode`** in the response to know how to read scores (see below).
+2. **Inspect `vectorHits` and `graphHits`** in the response to know how to read scores (see below).
 3. If the top results are clearly above the rest (big gap in `score`), read those and synthesize. Otherwise read the top 3-5 and merge.
 4. **Cite each `path` you used.** Quote snippets directly.
 5. If nothing is found (empty `results` or a flat distribution with no clear winners), say so honestly. **Do not fabricate.**
@@ -44,14 +44,16 @@ curl -s -H "Authorization: Bearer $TOKEN" \
 
 ### How to read scores
 
-The score's scale depends on `mode`:
+The score's scale depends on **`vectorHits`**, not on `mode` (`mode` is `hybrid` whenever graph neighbours are included, even without vectors):
 
-| `mode` | Typical top `score` | What "good" looks like |
+| Case | Typical `score` | What "good" looks like |
 |---|---|---|
-| `keyword` | 50–300+ (additive: filename-exact ≈ 200, phrase-in-title ≈ 50) | A clear gap (2×+) between top result and the rest. |
-| `hybrid` / `vector` | 0.015–0.035 (RRF: `1/(60+rank)`-based) | Top RRF score near `0.032` ≈ matched in both keyword and vector top-1. |
+| `vectorHits: 0` | additive keyword score, tens to hundreds | A clear gap (2×+) between top result and the rest. |
+| `vectorHits > 0` | RRF, small values (`1/(60+rank)`-based) | Relative order only. |
 
-**Don't apply a fixed threshold across modes.** Sort by `score` descending and rely on the relative gap. Use `vectorScore` (when present) for "how strong was the semantic match" — it's a raw similarity in `[0, 1]`, much easier to threshold than RRF.
+Results with `graphRelatedTo` are one-hop graph neighbours of the top hits, not text matches: they are interleaved, so the list is not strictly sorted. Treat them as "related", not as answers.
+
+**Don't apply a fixed threshold across responses.** Rely on the relative gap among the non-graph hits. Use `vectorScore` (when present) for "how strong was the semantic match": a blended per-page value in `[0, 1]`.
 
 Answer template:
 
@@ -89,7 +91,7 @@ const { content } = await r.json()
 
 ## "What pages link to X?" / "Show me the neighborhood of X"
 
-1. `GET /api/v1/projects/current/graph?limit=1000` — pull the whole graph once (cheap, < 1 MB for typical projects).
+1. `GET /api/v1/projects/current/graph?limit=1000` — pull the graph (`limit` max 1000; if `hasMore: true`, page with `offset`).
 2. Find `nodes[i].id === X` (or label substring match).
 3. Filter `edges` for `source === X || target === X`. The other endpoint is a neighbor.
 
@@ -97,13 +99,10 @@ const { content } = await r.json()
 curl -s -H "Authorization: Bearer $TOKEN" "$BASE/api/v1/projects/current/graph?limit=1000"
 ```
 
-You can also let the API filter for you:
-
-```bash
-curl -s -H "Authorization: Bearer $TOKEN" "$BASE/api/v1/projects/current/graph?q=rope&limit=200"
-```
-
-This applies a substring filter on `id` or `label` (case-insensitive) and returns the matching subgraph including the edges between matched nodes.
+`?q=rope` filters **nodes** by substring of `id` / `label` (case-insensitive) and returns only the edges between matching
+nodes: it does **not** return the neighbours of `rope` unless their names also contain `rope`. Use it to find
+the node, then steps 1-3 for the neighbourhood. With more than 1000 nodes, `edgeScope=filtered` returns, for each page of
+nodes, the edges towards all filtered nodes. Pages with `type: query` never appear in the graph.
 
 Render a small mermaid graph when the user wants a visual:
 
@@ -127,7 +126,7 @@ curl -s -H "Authorization: Bearer $TOKEN" \
   "$BASE/api/v1/projects/current/files?root=wiki&recursive=true&maxFiles=500"
 ```
 
-Summarize the directory structure (`concepts/`, `entities/`, `sources/`…) and rough page counts per category.
+Summarize the directory structure (`concepts/`, `entities/`, `sources/`…) and rough page counts per category. If the wiki has more entries than `maxFiles`, the call fails with **413** instead of returning a partial tree: raise `maxFiles` (up to 10000). On 0.6.13 each `path` is absolute (`//?/C:/...` on Windows): strip the project path before passing it to `files/content`.
 
 **Topical overview** — read the curated index:
 
@@ -146,26 +145,34 @@ The user's `purpose.md` describes intent; `index.md` enumerates pages; `overview
 
 ## "I added new docs to the source folder — re-index"
 
-1. `POST /api/v1/projects/current/sources/rescan`
+0. Check `GET /api/v1/projects`: the target project should be the one with `current: true`. Ingest is queued by the desktop UI, only for the project **open in the UI** (unless "Watch all projects" is on), with Source Watch `enabled` + `autoIngest` and a usable LLM. If the project is not open, tell the user to open it first.
+1. `POST /api/v1/projects/{id}/sources/rescan`
 2. Read back `changedTasks`. Report:
    - "Detected N new / M modified / K deleted files."
    - List the first ~5 file paths so the user can verify.
-3. Tell the user the **actual ingest** runs asynchronously via the desktop queue — encourage them to open the Activity panel if they want progress.
+3. Tell the user the **actual ingest** runs asynchronously in the desktop queue, and only under the conditions in step 0 — encourage them to open the Activity panel to confirm it started.
 
 ```bash
 curl -s -X POST -H "Authorization: Bearer $TOKEN" \
-  "$BASE/api/v1/projects/current/sources/rescan"
+  "$BASE/api/v1/projects/$PROJECT_ID/sources/rescan"
 ```
+
+Often no rescan is needed: with the project open, the app's watcher picks up files written into `raw/sources/` within
+seconds.
 
 If `changedTasks` is empty:
 
-> No file changes detected. If you added files but they're not appearing, check `Settings → Source Watch` — your filters may be excluding them (e.g., `.json` is excluded by default).
+> No new changes since the app last looked. Each change is reported once, so files the watcher already saw are not listed again, even if they were not ingested. If you added files and nothing appears in the Activity panel, check that the project is open and `Settings → Source Watch` (`enabled`, `autoIngest`, filters: e.g. `.json` is excluded by default).
+
+An **unchanged** source is never ingested again, whether by rescan or by re-queuing it in the UI: the ingest cache
+matches the hash of the extracted text, and editing `schema.md` / `purpose.md` or switching model does not invalidate it
+.
 
 ---
 
 ## "Find every page that mentions Y" (broad sweep)
 
-Search is ranked (hybrid when embeddings are configured, keyword otherwise) and capped at 50 hits per call. For **exhaustive** sweeps:
+Search is ranked (keyword + one-hop graph neighbours, plus vectors when embeddings are configured), covers only `wiki/**/*.md` and is capped at 50 hits per call; graph neighbours take part of those 50. For **exhaustive** sweeps:
 
 1. Run `POST .../search` with `topK: 50` and your term.
 2. If the 50th result still has a non-trivial score (relative to the top), run again with a more specific query — the API will not return more than 50 in one call.
@@ -190,9 +197,12 @@ When the user names a specific project rather than implying the active one.
      "projects": [
        {"id":"abc-…","name":"Research Notes","path":"/Users/me/wiki/research","current":true},
        {"id":"def-…","name":"Reading","path":"/Users/me/wiki/reading","current":false}
-     ]
+     ],
+     "currentProject": {"id":"abc-…","name":"Research Notes","path":"/Users/me/wiki/research","current":true}
    }
    ```
+
+   The list can include projects unrelated to the user's request: match only what the user named.
 
 2. Match the user's spoken name. Case-insensitive substring on `name`:
 
@@ -261,15 +271,15 @@ User has been asking about the active project, then says "now check my Reading p
 3. **Confirm the switch in your reply once**: *"Switching to your Reading project…"*. Don't silently apply.
 4. Keep the user's query — apply it to the new project.
 
-The desktop UI's active project does **not** change just because you used a different `{id}` — your API calls scoped to a non-current id are read-only and don't affect the user's UI state.
+The desktop UI's active project does **not** change just because you used a different `{id}`. Read calls on a non-current id do not affect the UI; write routes (rescan, reviews, `pages/write`, `pages/embed`, chat) still change that project's state.
 
 ---
 
 ## Anti-patterns
 
-- **Don't `POST /chat`** — it returns 501. Use the desktop chat UI, or call your own LLM with the wiki content as context.
-- **Don't paginate the file tree with maxFiles=1, maxFiles=2, …** — there's no offset/cursor. Use a higher cap or filter by `root=`.
-- **Don't bypass the API for writes.** The API is read-mostly. Writing to `wiki/**` or `raw/sources/**` via the filesystem directly bypasses the file-sync watcher. Use the desktop UI's Sources → Import flow or the ingest pipeline.
+- **Don't `POST /chat` casually** — on 0.4.x it returns 501; on 0.6.13 it is a real agent chat that spends the app's LLM calls (`/health` → `agent.chat: true`). Use it only after the user confirmed.
+- **Don't paginate the file tree with maxFiles=1, maxFiles=2, …** — there's no offset/cursor, and exceeding `maxFiles` returns 413. Use a higher cap or filter by `root=`.
+- **Don't edit `wiki/**` behind the app's back.** Direct filesystem edits to wiki pages skip merge, ingest cache and file history, and do not trigger ingest; on 0.6.13 use `pages/write` (with user confirmation). Adding files to `raw/sources/**` from outside is fine: the app's watcher sees them and queues ingest under the conditions of the "re-index" recipe.
 - **Don't include the token in URLs you echo / log / show.** Use headers in any output visible to the user.
 - **Don't retry blindly on 429 / 503** — back off explicitly (1s / 2s respectively).
 - **Don't shell out to a wrapper script.** The API is the contract. Direct `curl` / `fetch` is the interface.
@@ -292,14 +302,15 @@ curl -s -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"query":"flash attention","topK":5,"includeContent":true}' \
   "$BASE/api/v1/projects/current/search"
 
-# 3. graph filter for "flash-attention" neighborhood
+# 3. graph for the "flash-attention" neighborhood: q=flash only returns nodes whose id/label contains "flash",
+#    so pull the graph and filter edges touching "flash-attention" client-side
 curl -s -H "Authorization: Bearer $TOKEN" \
-  "$BASE/api/v1/projects/current/graph?q=flash&limit=200"
+  "$BASE/api/v1/projects/current/graph?limit=1000"
 ```
 
 Agent (to user):
 
-> Looking in your active project. Search ran in **hybrid mode** (tokenHits=12, vectorHits=8) — top hit `wiki/concepts/flash-attention.md` matched both keyword and vector signals (`vectorScore=0.91`).
+> Looking in your active project. Search used keyword + vector signals (tokenHits=12, vectorHits=8, graphHits=2) — top hit `wiki/concepts/flash-attention.md` matched both (`vectorScore=0.91`).
 >
 > Your wiki explains FlashAttention as a memory-efficient exact attention implementation that tiles the QKV matrices to avoid materializing the full N×N attention map. Key claim: **2-4× speedup at long context on A100s** (per your wiki).
 >

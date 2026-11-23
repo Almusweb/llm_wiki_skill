@@ -29,13 +29,13 @@ The skill is three markdown files and nothing else. Drop the folder anywhere you
 
 ## What this skill enables
 
-- "What does my wiki say about X?" → hybrid search (keyword + vector) + read
-- "Show me the neighborhood of node Y in my graph" → wikilinks traversal
+- "What does my wiki say about X?" → search (keyword + one-hop graph neighbours, plus vectors when embeddings are configured) + read
+- "Show me the neighborhood of node Y in my graph" → graph traversal (wikilinks and `related:`)
 - "Read me the page about Z" → file content fetch
-- "I just added new docs, re-index" → backend rescan
+- "I just added new docs, re-index" → backend rescan (ingest itself is queued by the desktop UI, see `api-reference.md`)
 - "Give me a structural overview of my wiki" → file tree + index.md
 
-All read-only except `sources/rescan` (triggers an internal queue diff).
+On 0.4.x everything is read-only except `sources/rescan`. On **0.6.13** reviews, `pages/write`, `pages/embed` and `chat` also change state or spend LLM calls: use them only after the user confirmed.
 
 ## Files
 
@@ -52,13 +52,13 @@ No scripts, no wrappers. If you find yourself wanting one, just `curl`.
 
 1. **LLM Wiki desktop app installed and running.** The API binds to `127.0.0.1:19828` only while the app is open. If the app isn't running, the agent will see `connection refused` and tell you.
 
-2. **API server enabled.** Default: on. Verify in `Settings → API Server → "Enable local HTTP API"` is checked.
+2. **API server enabled.** Default: on. Verify in `Settings → API + MCP → "Enable local HTTP API"` is checked (the section was called "API Server" in older builds).
 
 3. **Token configured.** Default: off (token field empty → every endpoint returns 401). Either:
-   - In the app: `Settings → API Server → Generate new token`. Copy and stash it.
+   - In the app: `Settings → API + MCP → Generate new token`. Copy and stash it.
    - Via env: `export LLM_WIKI_API_TOKEN=...` (overrides UI; persists for the agent process).
 
-   You can also flip `Settings → API Server → "Allow access without a token"`, which removes auth entirely. **Local-only — but any process on this machine can then read your wiki.** Use only with trusted setups.
+   You can also flip `Settings → API + MCP → "Allow access without a token"`, which removes auth for the read and review routes; chat, cancel, `pages/write` and `pages/embed` still require the token. **Any process or browser page on this machine can then call the API.** Use only with trusted setups.
 
 ## Quick smoke test
 
@@ -104,31 +104,33 @@ Add `| jq` at the end of any of these if you have `jq` installed and want pretty
 |---|---|---|
 | `curl: (7) Failed to connect to 127.0.0.1 port 19828` | App not running | Launch LLM Wiki desktop, wait ~2s for the API server to bind. |
 | `Status: port_conflict` in `/health` | Another process on 19828 | `lsof -i :19828` to find the squatter; quit and restart the app. |
-| Every endpoint returns 401 | No token configured | Settings → API Server → Generate; OR `export LLM_WIKI_API_TOKEN=...` |
-| Every endpoint returns 503 with "disabled" | Kill switch is on | Settings → API Server → check "Enable local HTTP API". |
-| Every endpoint returns 503 with "busy" | In-flight cap reached (64 concurrent) | Back off, send fewer parallel requests. |
-| 429 on rapid requests | Rate limit: 120 req/sec global | Back off ≥1s. |
+| Every endpoint returns 401 | No token configured | Settings → API + MCP → Generate; OR `export LLM_WIKI_API_TOKEN=...` |
+| Every endpoint returns 503 with "disabled" | Kill switch is on | Settings → API + MCP → check "Enable local HTTP API". |
+| Every endpoint returns 503 with "busy" | In-flight cap reached (64 concurrent; 8 chat streams, 4 page embeds on 0.6.13) | Back off, send fewer parallel requests. |
+| 429 on rapid requests | Rate limit: 120 req/sec global, no `Retry-After` header | Back off ≥1s. |
+| `files` returns 413 | Tree larger than `maxFiles` (0.6.13 does not truncate) | Raise `maxFiles` (max 10000) or narrow `root=`. |
+| Rescan lists files but nothing is ingested | Ingest is queued by the UI only for the open project, with Source Watch `enabled` + `autoIngest` and a usable LLM; unchanged sources hit the ingest cache | Open the project in the app, check Settings → Source Watch, see `api-reference.md` → "When does ingest actually start". |
 | `files/content` returns 415 on `.pdf` | API is text-only | Read source PDFs via the desktop UI; only text-ish extensions are exposed. |
 | `tokenSource: "env"` even though I cleared it from UI | `LLM_WIKI_API_TOKEN` env var is set somewhere | `unset LLM_WIKI_API_TOKEN`; or set its value to match what's in your UI. |
 
 ## Security model
 
-- The API listens on `127.0.0.1` only. It is **not reachable from other hosts** on your network.
+- The API listens on `127.0.0.1` by default. On 0.6.13 the option "Allow API and Clip server access from the local network" makes it listen on `0.0.0.0` **after an app restart** (`/health` → `allowLanAccess` shows the setting, not the current bind).
 - Token-based auth is constant-time compared (no timing leak in the auth check).
 - Path traversal blocked at the route handler (`safe_join` with canonical-path prefix check).
 - File reads restricted to a whitelist (`purpose.md`, `schema.md`, `wiki/**`, `raw/sources/**`); text extensions only; 2 MB cap.
-- Body limit 1 MB; in-flight cap 64; rate limit 120/sec.
-- No write endpoints in v1. `/sources/rescan` is the only mutation, and it only reads disk + queues internal work.
+- Body limit 1 MB (chat 40 MiB, `pages/write` ~12 MiB on 0.6.13); in-flight cap 64; rate limit 120/sec.
+- v1 had no write endpoints. **0.6.13 adds** review mutations, `pages/write`, `pages/embed` and an agent chat (see `api-reference.md` → "Additions in app 0.6.13").
 
 What's **not** in the threat model:
 
 - A malicious **local** process with the token can read everything in your active project's wiki + sources. Treat the token as a local secret.
 - A malicious local process can probe `/health` (no auth) to discover the API exists. Information disclosure, no content leak.
-- Cross-origin browser pages can hit the API only if they have the token. Default CORS is `*` — relies on token secrecy. Don't paste your token into untrusted web tools.
+- Cross-origin browser pages: on 0.4.x CORS was `*`. On 0.6.13 the `Origin` is reflected only for local and extension/Tauri origins; other origins get no CORS header, but the server still processes the request — CORS only stops the browser from reading the response. It still relies on token secrecy. Don't paste your token into untrusted web tools.
 
 ## Version
 
-This skill matches **LLM Wiki API v1** as shipped in app version `0.4.10+`. Hybrid retrieval (keyword + vector) is live; the response carries `mode: "keyword" | "vector" | "hybrid"`, `tokenHits`, `vectorHits`, and per-result `vectorScore`. If the desktop app's `/health` reports a major version bump, check `api-reference.md` for drift before relying on the contract verbatim.
+This skill matches **LLM Wiki API v1** as shipped in app `0.4.10+` and documents app **0.6.13** (search adds `graphHits` and `graphRelatedTo`; `mode` is `hybrid` whenever graph neighbours are included, even without vectors). If the desktop app's `/health` reports another version, check `api-reference.md` for drift before relying on the contract verbatim.
 
 ## Updating
 
