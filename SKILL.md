@@ -80,7 +80,7 @@ The token is one of:
 2. The user's `apiConfig.token` saved in Settings → **API + MCP** (labelled "API Server" in older builds and in some messages)
 3. `allowUnauthenticated: true` mode (no token needed; rare, user opt-in only). In this mode `projects`, `files`, `files/content`, `reviews`, `search`, `graph` and `sources/rescan` stay open. `chat`, `chat/{sessionId}/cancel`, `pages/embed` and `pages/write` always require the token. See `api-reference.md` → `allowUnauthenticated`.
 
-Always check `/api/v1/health` first — it returns `ok`, `status`, `version`, `enabled`, `authRequired`, `authConfigured`, `allowUnauthenticated` and `tokenSource`; app 0.6.13 adds `mcpEnabled`, `allowLanAccess` and `agent` (`chat`, `streaming`, `streamProtocol`). The auth check uses `authConfigured` and `allowUnauthenticated`. **If `authConfigured: false && allowUnauthenticated: false`, ask the user to open `Settings → API + MCP → Generate new token`**. Do not proceed without auth being set up.
+Always check `/api/v1/health` first — it returns `ok`, `status`, `version`, `enabled`, `authRequired`, `authConfigured`, `allowUnauthenticated` and `tokenSource`; on app 0.6.13 it also returns `mcpEnabled`, `allowLanAccess` and `agent` (`chat`, `streaming`, `streamProtocol`). The auth check uses `authConfigured` and `allowUnauthenticated`. **If `authConfigured: false && allowUnauthenticated: false`, ask the user to open `Settings → API + MCP → Generate new token`**. Do not proceed without auth being set up.
 
 Three equivalent ways to send the token:
 
@@ -113,7 +113,7 @@ Scores are not comparable between modes or between responses with different `vec
 
 ### Project resolution
 
-`{id}` in every project-scoped endpoint accepts **four forms**:
+`{id}` in every project-scoped endpoint accepts **three forms** on the server. The table adds a fourth line, the project name, which the server does not accept: resolve it on the client to an `id`.
 
 | Form | When to use | Example |
 |---|---|---|
@@ -154,7 +154,7 @@ For graph / cross-reference questions:
 - `GET /api/v1/projects/{id}/graph?limit=200&offset=0` → `{ nodes: [{id, label, nodeType, path, linkCount}], edges: [{source, target, weight}], offset, limit, totalCount, hasMore }`
 - Filter via `?q=term` (substring of id/label, case-insensitive) and `?nodeType=...` (camelCase: `node_type` is silently ignored; an unknown value returns 0 nodes). `nodeType` is an open set, not a fixed list: it is the lowercased value of the page's first `type:` line (`other` if there is none). `entity`, `concept` and `other` are examples, not a complete list. Pages with `type: query` are **not** graph nodes.
 - `q` filters nodes only and returns edges between matching nodes: it does **not** return the neighbours of a match. For neighbours, page through the full graph and filter edges client-side.
-- Pagination (0.6.13+): `limit` defaults to 200 and is clamped to 1-1000 (larger values become 1000; `0`, negative or non-numeric → 400). Read `hasMore` and request the next page with `offset`. With the default `edgeScope=page` an edge is returned only when both ends are on the page; `edgeScope=filtered` returns the edges between the filtered nodes, also outside the page. Any other `edgeScope` → 400. This applies to `graph` only: `files` has no pagination.
+- Pagination: `limit` defaults to 200 and is clamped to 1-1000 (larger values become 1000; `0`, negative or non-numeric → 400). Read `hasMore` and request the next page with `offset`. With the default `edgeScope=page` an edge is returned only when both ends are on the page; `edgeScope=filtered` returns the edges between the filtered nodes, also outside the page. Any other `edgeScope` → 400. This applies to `graph` only: `files` has no pagination.
 - Edges come from `[[wikilinks]]` **and** the frontmatter `related:` list; a link that matches more than one page is dropped. The graph does not depend on embeddings. The backend caches the graph for 5 s.
 
 For "I added new docs" requests:
@@ -165,12 +165,12 @@ For "I added new docs" requests:
 
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/api/v1/health` | No auth. Returns `{ ok, status, version, enabled, authRequired, authConfigured, allowUnauthenticated, tokenSource }`; 0.6.13 adds `mcpEnabled`, `allowLanAccess` and `agent` (`{ chat, streaming, streamProtocol }`), and also answers on `/health` without the prefix. `allowLanAccess` shows the setting, not the listen address. |
-| GET | `/api/v1/projects` | List projects. Each: `{ id, name, path, current }`; 0.6.13 adds top-level `currentProject`. |
+| GET | `/api/v1/health` | No auth. Returns `{ ok, status, version, enabled, authRequired, authConfigured, allowUnauthenticated, tokenSource }`; on 0.6.13 it also returns `mcpEnabled`, `allowLanAccess` and `agent` (`{ chat, streaming, streamProtocol }`), and answers on `/health` without the prefix. `allowLanAccess` shows the setting, not the listen address. |
+| GET | `/api/v1/projects` | List projects. Each: `{ id, name, path, current }`, plus a top-level `currentProject`. |
 | GET | `/api/v1/projects/{id}/files?root=wiki\|sources\|all&recursive=true&maxFiles=2000` | `root`: `wiki`, `sources` (alias `raw`, `raw/sources`) or `all`. Tree of `{ name, path, isDir, size, children }`. On 0.6.13 `path` is **absolute** (on Windows `//?/C:/...`): strip the project path to get the relative path for `files/content`. Exceeding `maxFiles` → **413**. Capped at 10000 nodes. |
 | GET | `/api/v1/projects/{id}/files/content?path=wiki/foo.md` | Text files only: md, mdx, txt, csv, json, yaml, yml, xml, html, htm, log. `rtf` is not readable (415). 2 MB max. 400 if `path` is missing, 403 on out-of-scope path (also `.llm-wiki/`, `..`, dot-segments, directories), 415 on binary, 413 on oversize. |
 | POST | `/api/v1/projects/{id}/search` | Body: `{ "query": "...", "topK": 10, "includeContent": false, "queryEmbedding": null }` (`queryEmbedding`: optional precomputed `number[]`; `limit` is ignored). Keyword + one-hop graph candidates, plus vectors when embeddings are configured; see "Reading the score". Response includes `mode`, `tokenHits`, `vectorHits`, `graphHits` and `results`; don't treat the lists of response and result fields as complete. Searches `wiki/**/*.md` only, at most 10,000 files, with no truncation signal in the response. `content` is absent (not `null`) unless `includeContent: true`. Empty query → 400. |
-| GET | `/api/v1/projects/{id}/graph?q=&nodeType=&limit=200&offset=0&edgeScope=page` | Graph from `wiki/**/*.md` wikilinks and `related:`. `limit` defaults to 200 and is clamped to 1–1000 (5000 becomes 1000; `0`, negative or non-numeric → 400). **0.6.13+:** `offset` and `edgeScope` (`page` \| `filtered`; any other value → 400) for pagination; response adds `offset`, `limit`, `totalCount`, `hasMore`. `q` filters nodes only. Pages with `type: query` are not nodes. The backend caches the graph for 5 s. |
+| GET | `/api/v1/projects/{id}/graph?q=&nodeType=&limit=200&offset=0&edgeScope=page` | Graph from `wiki/**/*.md` wikilinks and `related:`. `limit` defaults to 200 and is clamped to 1–1000 (5000 becomes 1000; `0`, negative or non-numeric → 400). `offset` and `edgeScope` (`page` \| `filtered`; any other value → 400) paginate the graph; the response has `offset`, `limit`, `totalCount`, `hasMore`. `q` filters nodes only. Pages with `type: query` are not nodes. The backend caches the graph for 5 s. |
 | POST | `/api/v1/projects/{id}/sources/rescan` | Triggers a backend rescan using the user's Source Watch config. It updates the file snapshot and returns the post-rescan queue and `changedTasks`. It does **not** itself queue ingest in the app: see `api-reference.md`. |
 | GET | `/api/v1/projects/{id}/reviews?status=&type=&limit=` | 0.6.13. Reads the review items. Filters and fields: `api-reference.md` → "GET /projects/{id}/reviews". |
 | PATCH | `/api/v1/projects/{id}/reviews/{reviewId}` | 0.6.13. **Writes**: rewrites `.llm-wiki/review.json` of the project in `{id}`. The request body is not documented here. |

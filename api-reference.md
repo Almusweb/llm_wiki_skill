@@ -55,7 +55,7 @@ Use them only when the user explicitly asks for that action. Review changes, `so
 }
 ```
 
-The last three fields are 0.6.13 additions. `/health` also answers without the prefix (`GET /health`) and to
+`/health` also answers without the prefix (`GET /health`) and to
 `POST`.
 
 Field reference:
@@ -67,9 +67,9 @@ Field reference:
 - `allowUnauthenticated` — no token needed for the open routes listed under the token forms above (rare; user opt-in only)
 - `tokenSource` — `env` / `store` / `none`. If `env`, the desktop UI token field is **ignored**.
 - `version` — the app version string (for example `"0.6.13"`).
-- `mcpEnabled` — 0.6.13: the app's MCP setting.
-- `allowLanAccess` — 0.6.13: the LAN listening setting. It shows the setting, not the address in use (see "Listen address").
-- `agent` — 0.6.13: `{ chat, streaming, streamProtocol }`. Observed on 0.6.13: `chat: true` and `streamProtocol: "sse"`.
+- `mcpEnabled` — the app's MCP setting.
+- `allowLanAccess` — the LAN listening setting. It shows the setting, not the address in use (see "Listen address").
+- `agent` — `{ chat, streaming, streamProtocol }`. Observed on 0.6.13: `chat: true` and `streamProtocol: "sse"`.
 
 ---
 
@@ -98,7 +98,7 @@ Field reference:
 }
 ```
 
-`currentProject` is a 0.6.13 addition and belongs to this response, not to `/health`. The list can hold several projects: work only on the ones the user means. Paths use forward slashes on Windows (`C:/...`).
+`currentProject` belongs to this response, not to `/health`. The list can hold several projects: work only on the ones the user means. Paths use forward slashes on Windows (`C:/...`).
 
 The `current` flag is true for the project the desktop UI has set as current; the literal `current` in `{id}` resolves to that project. Use it when the user doesn't name a project explicitly.
 
@@ -288,7 +288,7 @@ Response:
 }
 ```
 
-`graphHits` (0.6.13) is the number of one-hop graph candidates in `results`. `content` is **absent**, not `null`,
+`graphHits` is the number of one-hop graph candidates in `results`. `content` is **absent**, not `null`,
 unless `includeContent: true`. The response and result examples show the fields known to the skill; don't treat
 them as a complete list.
 
@@ -329,7 +329,7 @@ The skill documents no numeric range for RRF scores, and none for scores with em
 | `vectorScore` | optional | Composite per-page vector score when the page matched via the vector index: best chunk plus up to 30% of the other chunks, not above 1 — not a raw cosine. Copied into a result only when RRF is applied or for vector-only results; absent without vectors. |
 | `images` | yes | Embedded `![alt](url)` references discovered in the markdown, deduped by URL. Useful for the agent to surface diagrams. |
 | `content` | optional | Full markdown, only when `includeContent: true`. |
-| `graphRelatedTo` | optional | 0.6.13: titles of the hits this page is a graph neighbour of; present only on graph candidates. |
+| `graphRelatedTo` | optional | Titles of the hits this page is a graph neighbour of; present only on graph candidates. |
 
 These are the fields the skill documents, not a complete list: a result can carry other fields.
 
@@ -348,8 +348,8 @@ Query params:
 | `q` | — | Substring filter on `id` or `label`, case-insensitive. Filters **nodes**; edges are only those between matching nodes, so `q` does not return a node's neighbours. |
 | `nodeType` | — | Filter on the page's `type:` (first `type:` line, lowercased; `other` if none). Examples: `entity`, `concept`, `other`. Exact match: an unknown value returns 0 nodes; `node_type` (snake_case) is ignored. |
 | `limit` | `200` | Absent → `200`. A number above `1000` is clamped to `1000` (`5000` becomes `1000`); `0`, negative or non-numeric → 400. |
-| `offset` | — | 0.6.13+. Start of the page; use it with `limit` to read the next page while `hasMore` is true. |
-| `edgeScope` | `page` | 0.6.13+. `page`: an edge is returned only when both ends are nodes of the returned page. `filtered`: edges between the filtered nodes are returned, also when an end is outside the page. Any other value → 400. |
+| `offset` | — | Start of the page; use it with `limit` to read the next page while `hasMore` is true. |
+| `edgeScope` | `page` | `page`: an edge is returned only when both ends are nodes of the returned page. `filtered`: edges between the filtered nodes are returned, also when an end is outside the page. Any other value → 400. |
 
 `nodeType` is an open set derived from `type:`, not a fixed list; the examples above are not complete. Pages with `type: query` are **not** graph nodes (excluded on purpose, with their edges).
 
@@ -384,7 +384,7 @@ Response:
 }
 ```
 
-`offset`, `limit`, `totalCount` and `hasMore` are the pagination fields of 0.6.13+. Read `hasMore` before requesting another page.
+`offset`, `limit`, `totalCount` and `hasMore` are the pagination fields. Read `hasMore` before requesting another page.
 
 Edges are derived from `[[wikilink]]` references **and the frontmatter `related:` list** in `wiki/**/*.md`. Deduplicated by unordered pair `(source, target)` — `[[a]]` in b and `[[b]]` in a produce **one** edge. Self-edges are dropped. `weight` is `1.0`. Node `id` is the file stem, or the relative path when two pages share a stem; ambiguous links are dropped. The graph is rebuilt from the files on request and the backend keeps a 5 s cache of it; there is no indexing state and embeddings play no part.
 
@@ -526,9 +526,6 @@ A request from an origin that is not in the list is still served. CORS only stop
 
 ---
 
-## Additions in app 0.6.13
-
-`/health` adds `mcpEnabled`, `allowLanAccess`, `agent: {chat, streaming, streamProtocol: "sse"}`.
 ### Listen address
 
 The server listens on `127.0.0.1` by default. The listen address is chosen in this order:

@@ -25,7 +25,7 @@ ln -s "$(pwd)/llm_wiki_skill" ~/.claude/skills/llm-wiki
 
 ### Alternative — manual drop-in
 
-The skill is three markdown files and nothing else. Drop the folder anywhere your agent runtime discovers skills (e.g. Codex `agents/`, custom MCP server skill dir). No dependencies, no build step.
+The skill is four markdown files and nothing else. Drop the folder anywhere your agent runtime discovers skills (e.g. Codex `agents/`, custom MCP server skill dir). No dependencies, no build step.
 
 ## What this skill enables
 
@@ -110,7 +110,7 @@ Add `| jq` at the end of any of these if you have `jq` installed and want pretty
 | Every endpoint returns 503 with "busy" | In-flight cap reached (64 concurrent; 8 chat streams, 4 page embeds on 0.6.13) | Send fewer parallel requests and wait at least 2 s before retrying (your own caution; not tested under load). |
 | 429 on rapid requests | Rate limit: 120 requests per 1 s window, global (`/health` and `OPTIONS` not counted); no `Retry-After` header is known | Wait at least 1 s (your own caution; not tested under load). |
 | `files` returns 413 | Tree larger than `maxFiles` | Raise `maxFiles` (max 10000) or narrow `root=`. |
-| Rescan lists files but nothing is ingested | Ingest is queued by the UI only for the open project, with Source Watch `enabled` + `autoIngest` and a usable LLM; unchanged sources hit the ingest cache | Open the project in the app, check Settings → Source Watch, see `api-reference.md` → "When does ingest actually start". |
+| Rescan lists files but nothing is ingested | For the project open in the app, the UI queues the ingest only with Source Watch `enabled` + `autoIngest` and a usable LLM. For a project that is not open it depends on the "Watch all projects" option, and the skill does not know whether the ingest starts. Unchanged sources hit the ingest cache | Open the project in the app, check Settings → Source Watch, see `api-reference.md` → "When does ingest actually start". |
 | `files/content` returns 415 on `.pdf` | API is text-only | Read source PDFs via the desktop UI; only text-ish extensions are exposed. |
 | `tokenSource: "env"` even though I cleared it from UI | `LLM_WIKI_API_TOKEN` env var is set somewhere | `unset LLM_WIKI_API_TOKEN`; or set its value to match what's in your UI. |
 
@@ -133,14 +133,18 @@ What's **not** in the threat model:
 
 ## Version
 
-This skill matches **LLM Wiki API v1** as shipped in app `0.4.10+` and documents app **0.6.13** (search adds `graphHits` and `graphRelatedTo`; `mode` is `hybrid` whenever graph neighbours are included, even without vectors). If the desktop app's `/health` reports another version, check `api-reference.md` for drift before relying on the contract verbatim.
+This skill documents **LLM Wiki API v1** as implemented by app **0.6.13** (search results can include `graphHits` and `graphRelatedTo`; `mode` is `hybrid` whenever graph neighbours are included, even without vectors).
+
+Verified on 0.6.13 by reading the app source code at v0.6.13 and by checking some responses on a running app.
+
+Drift check: compare the `version` that `/health` reports with `0.6.13`. If it is any other version, check `api-reference.md` for drift before relying on the contract verbatim.
 
 ## Updating
 
 If you installed via `npx skills add`, re-run the same command to pull the latest revision:
 
 ```bash
-npx skills add https://github.com/nashsu/llm_wiki_skill.git --skill llm_wiki_skill
+npx skills add https://github.com/nashsu/llm_wiki_skill.git --skill llm-wiki
 ```
 
 If you cloned the repo, `git pull` inside the cloned folder is enough — the symlink picks up changes automatically.
