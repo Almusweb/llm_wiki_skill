@@ -172,9 +172,24 @@ For "I added new docs" requests:
 | POST | `/api/v1/projects/{id}/search` | Body: `{ "query": "...", "topK": 10, "includeContent": false, "queryEmbedding": null }` (`queryEmbedding`: optional precomputed `number[]`; `limit` is ignored). Keyword + one-hop graph candidates, plus vectors when embeddings are configured; see "Reading the score". Response includes `mode`, `tokenHits`, `vectorHits`, `graphHits` and `results`; don't treat the lists of response and result fields as complete. Searches `wiki/**/*.md` only, at most 10,000 files, with no truncation signal in the response. `content` is absent (not `null`) unless `includeContent: true`. Empty query → 400. |
 | GET | `/api/v1/projects/{id}/graph?q=&nodeType=&limit=200&offset=0&edgeScope=page` | Graph from `wiki/**/*.md` wikilinks and `related:`. `limit` defaults to 200 and is clamped to 1–1000 (5000 becomes 1000; `0`, negative or non-numeric → 400). **0.6.13+:** `offset` and `edgeScope` (`page` \| `filtered`; any other value → 400) for pagination; response adds `offset`, `limit`, `totalCount`, `hasMore`. `q` filters nodes only. Pages with `type: query` are not nodes. The backend caches the graph for 5 s. |
 | POST | `/api/v1/projects/{id}/sources/rescan` | Triggers a backend rescan using the user's Source Watch config. Returns post-rescan queue + changed tasks. Does **not** itself queue ingest: see `api-reference.md`. |
-| POST | `/api/v1/projects/{id}/chat` | **0.4.x: 501** — not implemented. Don't call. |
+| GET | `/api/v1/projects/{id}/reviews?status=&type=&limit=` | 0.6.13. Reads the review items. Filters and fields: `api-reference.md` → "GET /projects/{id}/reviews". |
+| PATCH | `/api/v1/projects/{id}/reviews/{reviewId}` | 0.6.13. **Writes**: rewrites `.llm-wiki/review.json` of the project in `{id}`. The request body is not documented here. |
+| DELETE | `/api/v1/projects/{id}/reviews/{reviewId}` | 0.6.13. **Writes**: rewrites `.llm-wiki/review.json` of the project in `{id}`. |
+| POST | `/api/v1/projects/{id}/reviews/resolve` | 0.6.13. **Writes**: rewrites `.llm-wiki/review.json` of the project in `{id}`. The request body is not documented here. |
+| POST | `/api/v1/projects/{id}/pages/write` | 0.6.13. **Writes** a markdown page. Body: `{ "path": "...", "content": "...", "allowOverwrite": ... }`. The token is always required. **409** if the page exists and `allowOverwrite` is not set; **400** for the path, the markdown or the size; **500** otherwise. Body limit about 12 MiB. |
+| POST | `/api/v1/projects/{id}/pages/embed` | 0.6.13. Changes state; what it writes is not documented here. The token is always required. 400 if embedding is not configured; 503 while 4 embeds are running. The request body is not documented here. |
+| POST | `/api/v1/projects/{id}/chat` | 0.6.13. Starts an agent chat turn, which writes to the agent sessions of the project. Replies in JSON or as an SSE stream (events `meta`, `agent`, `done`, `cancelled`, `error`). The token is always required. The request body is not documented here. 503 with more than 8 chat streams running; body limit 40 MiB. |
+| (not documented) | `/api/v1/projects/{id}/chat/{sessionId}/cancel` | 0.6.13. Cancel route for a chat session. The token is always required. The HTTP verb and the outcome of a cancellation are not documented here. |
 
 `{id}` accepts a UUID, an absolute filesystem path (URL-encoded), or the literal string `current`.
+
+### Routes that change state
+
+On app 0.6.13 these routes change state: `sources/rescan`, the review routes `PATCH`, `DELETE` and `resolve`, `pages/write`, `pages/embed` and `chat`. All the limits are in `api-reference.md` → "Limits & defenses".
+
+- Call them **only when the user explicitly asks** for that action. Never call them to explore, to check that a route exists or to prepare an answer.
+- Review changes, `sources/rescan` and `pages/embed` act on the project named in `{id}`, not only on `current`: the app does not check that `{id}` is the current project. A call on a project that is not `current` is therefore **not** read-only. Whether `pages/write` and `chat` check it is not known: apply the same care.
+- The bodies of `chat`, of review `PATCH` and `resolve` and of `pages/embed` are not documented here. Do not guess them.
 
 ## Error handling
 
@@ -188,11 +203,11 @@ Always treat the status code as the contract:
 | 403 | Forbidden | Path traversal or out-of-scope (e.g. `../app-state.json`). Don't retry the same path. |
 | 404 | Not found | Unknown project id, unknown route, **or a wrong verb among GET, POST, PATCH and DELETE** (e.g. `GET .../search`). On unknown project, list projects first to recover. |
 | 405 | Method not allowed | Only for verbs outside GET, POST, PATCH and DELETE (e.g. `PUT`). `OPTIONS` is not a 405: it gets 204 with the CORS headers, before every other check. |
+| 409 | Conflict | `pages/write` only: the page exists and `allowOverwrite` is not set. Do not retry with `allowOverwrite` unless the user asked to replace the page. |
 | 413 | Payload too large | File > 2 MB or file tree > maxFiles. Suggest narrower scope. The status code for a request body over the generic 1 MiB limit is not known: do not rely on a specific one. |
 | 415 | Unsupported media | Binary or non-UTF-8 file content. API is text-only. |
 | 429 | Too many requests | Rate limit: 120 requests in a 1 s window, global; `/health` and `OPTIONS` are not counted. It applies before the token check. Known from the app code; not tested under load. No `Retry-After` header is known (see `api-reference.md` → "Limits & defenses"): wait at least 1 second, as your own caution. |
 | 500 | Internal error | Log + report; don't loop. |
-| 501 | Not implemented | `/chat` stub on 0.4.x. Don't retry. |
 | 503 | Service unavailable | API toggled off (`error` contains "disabled"); in-flight cap (64) reached ("busy"); on 0.6.13 also more than 8 chat streams or more than 4 page embeds running. Known from the app code; not tested under load. No `Retry-After` header is known: wait at least 2 seconds, as your own caution. |
 
 If the HTTP call itself fails (connection refused / ENOTFOUND): the desktop app is **not running**. Tell the user: "Launch LLM Wiki, then re-try."
@@ -200,7 +215,7 @@ If the HTTP call itself fails (connection refused / ENOTFOUND): the desktop app 
 ## Etiquette
 
 - **Cite paths.** When you answer using wiki content, name the page: `(from wiki/concepts/rope.md)`. The user uses these to verify and to jump in-app.
-- **Stay read-only by default.** `sources/rescan` changes state. On 0.6.13 other POST, PATCH and DELETE routes exist and change state too: call them only after the user explicitly asked for that change.
+- **Stay read-only by default.** The routes that change state (see "Routes that change state"), `pages/embed` and `chat` run only after the user explicitly asked for that action. A project id that is not `current` does not make a review change, a rescan or an embed read-only.
 - **Don't dump full pages unless asked.** Snippet + path is usually enough. Pull full content only when reasoning genuinely needs it.
 - **Respect the project boundary.** The current project is the user's active context. Do not silently switch projects.
 - **Honor the rate limit.** 120 requests per 1 s window is plenty for sequential work, but parallel page reads can burst close to it. Batch where the API allows (`includeContent: true` on search avoids N+1 reads).

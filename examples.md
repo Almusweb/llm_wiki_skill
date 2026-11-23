@@ -270,13 +270,13 @@ User has been asking about the active project, then says "now check my Reading p
 3. **Confirm the switch in your reply once**: *"Switching to your Reading project…"*. Don't silently apply.
 4. Keep the user's query — apply it to the new project.
 
-The desktop UI's active project does **not** change just because you used a different `{id}`. Read calls on a non-current id do not affect the UI; write routes (rescan, reviews, `pages/write`, `pages/embed`, chat) still change that project's state.
+The desktop UI's active project does **not** change just because you used a different `{id}`. Read calls on a non-current id do not affect the UI. Review changes (`PATCH`, `DELETE`, `resolve`), `sources/rescan` and `pages/embed` act on the project named in `{id}`, not only on `current`: a call on another project is not read-only. Whether `pages/write` and `chat` check it is not known: apply the same care.
 
 ---
 
 ## Anti-patterns
 
-- **Don't `POST /chat`** — on 0.4.x it returns 501 (on 0.6.13 `/health` reports `agent.chat: true`). Use the desktop chat UI, or call your own LLM with the wiki content as context.
+- **Don't call a route that changes state unless the user explicitly asked.** This covers review `PATCH`, `DELETE` and `resolve`, `pages/write`, `pages/embed`, `chat` and `sources/rescan`. Don't call them to explore, to check that a route exists or to prepare an answer, and don't guess the bodies that are not documented in `api-reference.md`.
 - **Don't paginate the file tree with maxFiles=1, maxFiles=2, …** — `files` has no offset or cursor (only `graph` is paginated), and exceeding `maxFiles` returns 413. Use a higher cap or filter by `root=`.
 - **Don't edit `wiki/**` behind the app's back.** Direct filesystem edits to wiki pages skip merge, ingest cache and file history, and do not trigger ingest; make the change in the desktop app. Adding files to `raw/sources/**` from outside is fine: the app's watcher sees them and queues ingest under the conditions of the "re-index" recipe.
 - **Don't include the token in URLs you echo / log / show.** Use headers in any output visible to the user.

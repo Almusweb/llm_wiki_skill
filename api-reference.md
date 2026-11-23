@@ -19,6 +19,20 @@ With `allowUnauthenticated: true` (user opt-in, reported by `/health`) the token
 | `projects`, `files`, `files/content`, `reviews`, `search`, `graph`, `sources/rescan` | Stay open: no token needed. |
 | `chat`, `chat/{sessionId}/cancel`, `pages/embed`, `pages/write` | The token is still always required. |
 
+## Routes that change state
+
+On app 0.6.13 these routes change state:
+
+| Route | What it changes |
+|---|---|
+| `POST .../sources/rescan` | The file snapshot of the project. |
+| `PATCH .../reviews/{reviewId}`, `DELETE .../reviews/{reviewId}`, `POST .../reviews/resolve` | They rewrite `.llm-wiki/review.json` of the project in `{id}`. |
+| `POST .../pages/write` | A markdown page. |
+| `POST .../pages/embed` | State of the project; what it writes is not documented here. |
+| `POST .../chat` | The agent sessions of the project. |
+
+Use them only when the user explicitly asks for that action. Review changes, `sources/rescan` and `pages/embed` act on the project named in `{id}`, not only on `current`: the app does not check that `{id}` is the current project, so a call on another project is not read-only. Whether `pages/write` and `chat` check it is not known: apply the same care. The bodies of `chat`, of review `PATCH` and `resolve` and of `pages/embed` are not documented here. Details of each route are below; the limits are in "Limits & defenses".
+
 ---
 
 ## GET /api/v1/health
@@ -380,7 +394,7 @@ Edges are derived from `[[wikilink]]` references **and the frontmatter `related:
 
 ## POST /api/v1/projects/{id}/sources/rescan
 
-**Auth:** required. **Mutates state.**
+**Auth:** required. **Mutates state.** It acts on the project named in `{id}`, not only on `current`.
 
 No body required.
 
@@ -433,7 +447,49 @@ project UUID, then `default`.
 
 ## POST /api/v1/projects/{id}/chat
 
-**0.4.x: returns 501.** Chat / RAG pipeline lives in the WebView in v1. Don't invoke. Tell the user to use the desktop chat UI.
+**Auth:** the token is always required, also with `allowUnauthenticated: true`. **Changes state** (agent sessions of the project). 0.6.13.
+
+The reply is JSON or an SSE stream. A stream carries these events: `meta`, `agent`, `done`, `cancelled`, `error`. `/health` reports `agent.chat` and `agent.streamProtocol` (observed on 0.6.13: `true` and `"sse"`).
+
+- The request body is not documented here. Do not guess it.
+- Body limit 40 MiB; more than 8 chat streams running at once → 503 (see "Limits & defenses").
+- What a cancellation leaves behind is not documented here.
+- Call it only when the user explicitly asks to talk to the app's agent.
+
+### /api/v1/projects/{id}/chat/{sessionId}/cancel
+
+**Auth:** the token is always required, also with `allowUnauthenticated: true`. 0.6.13. It is the cancel route for a chat session. `{sessionId}` is a URL segment. The HTTP verb and the outcome of a cancellation are not documented here.
+
+---
+
+## POST /api/v1/projects/{id}/pages/write
+
+**Auth:** the token is always required, also with `allowUnauthenticated: true`. **Changes state.** 0.6.13.
+
+Body:
+
+```json
+{ "path": "wiki/concepts/new-page.md", "content": "# New page\n...", "allowOverwrite": false }
+```
+
+| Status | When |
+|---|---|
+| 409 | The page already exists and `allowOverwrite` is not set. |
+| 400 | A problem with the path, the markdown or the size. |
+| 500 | Any other failure. |
+
+The values in the example are illustrative: the rules for `path` are not documented here. Body limit about 12 MiB (larger → 400). Call it only when the user explicitly asks to write that page; do not retry a 409 with `allowOverwrite` unless the user asked to replace the page.
+
+---
+
+## POST /api/v1/projects/{id}/pages/embed
+
+**Auth:** the token is always required, also with `allowUnauthenticated: true`. **Changes state**; what it writes is not documented here. 0.6.13.
+
+- The request body is not documented here. Do not guess it.
+- 400 if embedding is not configured; 503 while 4 page embeds are running.
+- It acts on the project named in `{id}`, not only on `current`.
+- Call it only when the user explicitly asks for it.
 
 ---
 
@@ -499,4 +555,9 @@ missing. `sourcePath` is the **absolute** path of the source; `createdAt` is a J
 item, and a resolved item stays resolved (`review-store.ts`). When the ingest queue drains, the app may resolve
 items by itself (`resolvedAction` `auto-resolved` or `llm-judged`) (`sweep-reviews.ts`).
 
-The desktop UI keeps reviews in memory and rewrites the whole `review.json` about 1 s after each change of its own store (e.g. an ingest adding reviews).
+### PATCH, DELETE and POST /projects/{id}/reviews/...
+
+**Changes state.** 0.6.13. `PATCH .../reviews/{reviewId}`, `DELETE .../reviews/{reviewId}` and `POST .../reviews/resolve` rewrite `.llm-wiki/review.json` of the project in `{id}`. Like the other review routes they act on the project named in `{id}`, not only on `current`.
+
+- The request bodies of `PATCH` and `resolve` are not documented here. Do not guess them.
+- Use them only when the user explicitly asks for that change to a review.

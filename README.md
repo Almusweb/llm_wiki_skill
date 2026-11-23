@@ -35,7 +35,7 @@ The skill is three markdown files and nothing else. Drop the folder anywhere you
 - "I just added new docs, re-index" → backend rescan (ingest itself is queued by the desktop UI, see `api-reference.md`)
 - "Give me a structural overview of my wiki" → file tree + index.md
 
-Read-only by default. `sources/rescan` changes state. On **0.6.13** other POST, PATCH and DELETE routes exist and change state too: use them only when the user explicitly asks.
+Read-only by default. On **0.6.13** these routes change state: `sources/rescan`, the review routes `PATCH`, `DELETE` and `resolve`, `pages/write`, `pages/embed` and `chat`. Use them only when the user explicitly asks. Review changes, rescan and embed act on any project named in `{id}`, not only on `current`.
 
 ## Files
 
@@ -123,7 +123,7 @@ Add `| jq` at the end of any of these if you have `jq` installed and want pretty
 - Path traversal blocked at the route handler (`safe_join` with canonical-path prefix check).
 - File reads restricted to a whitelist (`purpose.md`, `schema.md`, `wiki/**`, `raw/sources/**`); text extensions only; 2 MB cap.
 - Generic body limit 1 MiB; in-flight cap 64; rate limit 120 requests per 1 s window. Details in `api-reference.md` → "Limits & defenses".
-- v1 had no write endpoints. `/sources/rescan` changes state. On 0.6.13 other POST, PATCH and DELETE routes exist and change state too.
+- On 0.6.13 these routes change state: `sources/rescan`, the review routes `PATCH`, `DELETE` and `resolve`, `pages/write`, `pages/embed` and `chat`. Review changes, rescan and embed act on any project named in `{id}`, not only on `current`. Details in `api-reference.md` → "Routes that change state".
 
 What's **not** in the threat model:
 
