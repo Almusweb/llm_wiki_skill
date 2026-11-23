@@ -50,7 +50,7 @@ No scripts, no wrappers. If you find yourself wanting one, just `curl`.
 
 ## Prerequisites
 
-1. **LLM Wiki desktop app installed and running.** The API binds to `127.0.0.1:19828` only while the app is open. If the app isn't running, the agent will see `connection refused` and tell you.
+1. **LLM Wiki desktop app installed and running.** By default the API listens on `127.0.0.1:19828`, and only while the app is open (see "Security model" for LAN listening). If the app isn't running, the agent will see `connection refused` and tell you.
 
 2. **API server enabled.** Default: on. Verify in `Settings → API + MCP → "Enable local HTTP API"` is checked (the section was called "API Server" in older builds).
 
@@ -58,7 +58,7 @@ No scripts, no wrappers. If you find yourself wanting one, just `curl`.
    - In the app: `Settings → API + MCP → Generate new token`. Copy and stash it.
    - Via env: `export LLM_WIKI_API_TOKEN=...` (overrides UI; persists for the agent process).
 
-   You can also flip `Settings → API + MCP → "Allow access without a token"`, which removes auth for the read and review routes; chat, cancel, `pages/write` and `pages/embed` still require the token. **Any process or browser page on this machine can then call the API.** Use only with trusted setups.
+   You can also flip `Settings → API + MCP → "Allow access without a token"`, which sets `allowUnauthenticated: true`. Then `projects`, `files`, `files/content`, `reviews`, `search`, `graph` and `sources/rescan` need no token; `chat`, `chat/{sessionId}/cancel`, `pages/embed` and `pages/write` still always require it. **Any client that can reach the API port can then call the open routes.** By default that means any process on this machine. Use only with trusted setups.
 
 ## Quick smoke test
 
@@ -115,7 +115,9 @@ Add `| jq` at the end of any of these if you have `jq` installed and want pretty
 
 ## Security model
 
-- The API listens on `127.0.0.1` by default. On 0.6.13 the option "Allow API and Clip server access from the local network" makes it listen on `0.0.0.0` **after an app restart** (`/health` → `allowLanAccess` shows the setting, not the current bind).
+- The API listens on `127.0.0.1` by default. This is a default, not a guarantee. On 0.6.13 the option "Allow API and Clip server access from the local network" (`allowLanAccess`) makes it listen on `0.0.0.0`. The environment variable `LLM_WIKI_BIND_HOST` takes precedence over that option.
+- The listen address is applied when the server binds, not on each request, so a changed option needs a new bind (an app restart gives one). `/health` → `allowLanAccess` shows the setting, not the current bind.
+- Loopback and LAN use the same auth scheme, and the API uses plain HTTP. **With LAN listening the token travels in clear text on the network.** Turn the option on only on a network you trust. This is how the app code behaves; it was not tested by running the app.
 - Token-based auth is constant-time compared (no timing leak in the auth check).
 - Path traversal blocked at the route handler (`safe_join` with canonical-path prefix check).
 - File reads restricted to a whitelist (`purpose.md`, `schema.md`, `wiki/**`, `raw/sources/**`); text extensions only; 2 MB cap.
@@ -126,7 +128,7 @@ What's **not** in the threat model:
 
 - A malicious **local** process with the token can read everything in your active project's wiki + sources. Treat the token as a local secret.
 - A malicious local process can probe `/health` (no auth) to discover the API exists. Information disclosure, no content leak.
-- Cross-origin browser pages: on 0.4.x CORS was `*`. On 0.6.13 the `Origin` is reflected only for local and extension/Tauri origins; other origins get no CORS header, but the server still processes the request — CORS only stops the browser from reading the response. It still relies on token secrecy. Don't paste your token into untrusted web tools.
+- Requests from browser pages of any origin: the `Origin` is reflected in `Access-Control-Allow-Origin` only for browser-extension origins, `localhost`, `127.0.0.1`, `[::1]` and the Tauri origins. Other origins get no CORS header, but the server still processes their requests: CORS only stops the browser from reading the response, it is not access control. Don't paste your token into untrusted web tools.
 
 ## Version
 

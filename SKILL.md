@@ -72,11 +72,13 @@ Python is the same shape — `urllib.request`, `requests`, `httpx`, whatever you
 
 ## Auth model
 
-The API is **localhost-only**. The token is one of:
+The API listens on `127.0.0.1` by default. That is a default, not a guarantee: `allowLanAccess` makes it listen on `0.0.0.0`, and `LLM_WIKI_BIND_HOST` takes precedence over that setting. The listen address is applied when the server binds, not on each request, and `/health` → `allowLanAccess` shows the setting, not the address in use. Loopback and LAN use the same auth scheme and plain HTTP: the token is the only protection and, with LAN listening, it travels in clear text. If `allowLanAccess` is `true`, warn the user about this. See `api-reference.md` → "Listen address".
+
+The token is one of:
 
 1. `LLM_WIKI_API_TOKEN` environment variable (if set, overrides UI)
 2. The user's `apiConfig.token` saved in Settings → **API + MCP** (labelled "API Server" in older builds and in some messages)
-3. `allowUnauthenticated: true` mode (no token needed; rare, user opt-in only). Even then `chat`, `chat/.../cancel`, `pages/write` and `pages/embed` still require the token.
+3. `allowUnauthenticated: true` mode (no token needed; rare, user opt-in only). In this mode `projects`, `files`, `files/content`, `reviews`, `search`, `graph` and `sources/rescan` stay open. `chat`, `chat/{sessionId}/cancel`, `pages/embed` and `pages/write` always require the token. See `api-reference.md` → `allowUnauthenticated`.
 
 Always check `/api/v1/health` first — it returns `{ enabled, authConfigured, allowUnauthenticated, tokenSource }`. **If `authConfigured: false && allowUnauthenticated: false`, ask the user to open `Settings → API + MCP → Generate new token`**. Do not proceed without auth being set up.
 

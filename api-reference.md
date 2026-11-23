@@ -1,16 +1,23 @@
 # LLM Wiki API v1 — Endpoint reference
 
-Base URL: `http://127.0.0.1:19828`
+Base URL: `http://127.0.0.1:19828` (default; the listen address can change, see "Listen address" below)
 Prefix:   `/api/v1`
 Default content type: `application/json; charset=utf-8` (0.6.13 sends `application/json` without `charset`; the body is UTF-8)
 
-All non-`/health` endpoints require auth via one of:
+Except `/health`, every endpoint requires the token, sent in one of these forms:
 
 ```
 Authorization: Bearer <token>
 X-LLM-Wiki-Token: <token>
-?token=<urlencoded-token>
+?token=<urlencoded-token>          # last resort, leaks into logs
 ```
+
+With `allowUnauthenticated: true` (user opt-in, reported by `/health`) the token requirement changes per route:
+
+| Routes | With `allowUnauthenticated: true` |
+|---|---|
+| `projects`, `files`, `files/content`, `reviews`, `search`, `graph`, `sources/rescan` | Stay open: no token needed. |
+| `chat`, `chat/{sessionId}/cancel`, `pages/embed`, `pages/write` | The token is still always required. |
 
 ---
 
@@ -43,7 +50,7 @@ Field reference:
 - `enabled` — `false` = user toggled the API off; all non-`/health` endpoints return 503
 - `authRequired` — `false` iff `allowUnauthenticated: true`
 - `authConfigured` — `true` if env `LLM_WIKI_API_TOKEN` or `apiConfig.token` is set
-- `allowUnauthenticated` — anonymous local-process mode (rare; user opt-in only)
+- `allowUnauthenticated` — no token needed for the open routes listed under the token forms above (rare; user opt-in only)
 - `tokenSource` — `env` / `store` / `none`. If `env`, the desktop UI token field is **ignored**.
 
 ---
@@ -423,12 +430,8 @@ project UUID, then `default`.
 | In-flight requests | 64 concurrent | 503 "API server is busy" — back off ≥2s. |
 | Chat streams / page embeds | 8 / 4 concurrent | 503. |
 
-CORS (upstream v1 docs, **0.4.x only**): `Access-Control-Allow-Origin: *`. Preflight cached 10 min via `Access-Control-Max-Age: 600`. Allowed headers include `Authorization`, `X-LLM-Wiki-Token`, `Content-Type`.
-**0.6.13** (`src-tauri/src/cors.rs`): no `*`; the request `Origin` is reflected in `Access-Control-Allow-Origin` only for local origins (`localhost`, `127.0.0.1`, `[::1]`), `chrome-extension://` and `moz-extension://` origins, and the Tauri origins (`tauri://localhost`, `http(s)://tauri.localhost`); for any other origin the header is absent. `Access-Control-Allow-Methods: GET, POST, PATCH, DELETE, OPTIONS`.
-Observed: reflected for `http://localhost:3000`, `http://127.0.0.1`, `http://[::1]:8080`, `chrome-extension://…`,
-`tauri://localhost`, `http://tauri.localhost`, also on 401 responses; not for `https://example.com`, `null` or
-`http://localhost.evil.com`. **The server still serves the request**: CORS only stops a browser from reading the
-response, it is not access control. `OPTIONS` → 204 without auth, `Access-Control-Max-Age: 600`.
+CORS: the request `Origin` is reflected in `Access-Control-Allow-Origin` only for these origins: `chrome-extension://` and `moz-extension://` (any extension id), `localhost`, `127.0.0.1` and `[::1]` (with or without a port), `tauri://localhost` and `http(s)://tauri.localhost`. For any other origin the header is absent. The server never sends a wildcard origin. `Access-Control-Allow-Methods: GET, POST, PATCH, DELETE, OPTIONS`. Preflight cached 10 min via `Access-Control-Max-Age: 600`. Allowed headers include `Authorization`, `X-LLM-Wiki-Token`, `Content-Type`.
+A request from an origin that is not in the list is still served. CORS only stops a browser page from reading the response; it is not access control. `OPTIONS` → 204 without auth.
 
 Non-`GET` / non-`POST` methods → 405 (**0.4.x only**). In 0.6.13: 405 only for verbs outside
 GET/POST/PATCH/DELETE/OPTIONS (e.g. `PUT`), after the auth check; a known route with the wrong verb (e.g. `GET .../search`,
@@ -439,8 +442,17 @@ GET/POST/PATCH/DELETE/OPTIONS (e.g. `PUT`), after the auth check; a known route 
 ## Additions in app 0.6.13
 
 `/health` adds `mcpEnabled`, `allowLanAccess`, `agent: {chat, streaming, streamProtocol: "sse"}`.
-`allowLanAccess` reflects the setting; the bind address (`0.0.0.0` vs `127.0.0.1`) is read only when the server starts,
-and `LLM_WIKI_BIND_HOST` overrides it (`server_bind.rs`).
+### Listen address
+
+The server listens on `127.0.0.1` by default. The listen address is chosen in this order:
+
+1. `LLM_WIKI_BIND_HOST`, if it holds a valid host.
+2. `0.0.0.0`, if `allowLanAccess` is `true`.
+3. `127.0.0.1`.
+
+The address is evaluated each time the server binds (first start, or a new bind after an error), not on each request. A changed `allowLanAccess` has no effect until the server binds again. `/health` → `allowLanAccess` shows the setting, not the address the server actually listens on.
+
+There is no difference of auth scheme between loopback and LAN: the token is the only protection, and the API uses plain HTTP, so on the LAN the token travels in clear text. This is how the app code behaves; listening on the LAN was not tested by running the app.
 
 ### GET /projects/{id}/reviews
 
