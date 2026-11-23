@@ -158,15 +158,11 @@ curl -s -X POST -H "Authorization: Bearer $TOKEN" \
   "$BASE/api/v1/projects/$PROJECT_ID/sources/rescan"
 ```
 
-Often no rescan is needed: with the project open, the app's watcher picks up files written into `raw/sources/`.
-
 If `changedTasks` is empty:
 
-> No new changes: the app has already seen them. Each change is reported once, so files the watcher already saw are not listed again, even if they were not ingested. If you added files and nothing appears in the Activity panel, check that the project is open and `Settings → Source Watch` (`enabled`, `autoIngest`, filters: e.g. `.json` is excluded by default).
+> No new changes: the app has already seen them. Each change is reported once, so files the app already saw are not listed again, even if they were not ingested. If you added files and nothing appears in the Activity panel, check that the project is open and `Settings → Source Watch` (`enabled`, `autoIngest`, filters: e.g. `.json` is excluded by default).
 
-An **unchanged** source is never ingested again, whether by rescan or by re-queuing it in the UI: the ingest cache
-matches the hash of the extracted text, and editing `schema.md` / `purpose.md` or switching model does not invalidate it
-.
+The ingest cache key does not include `schema.md`, `purpose.md` or the model.
 
 ---
 
@@ -194,7 +190,7 @@ Search is ranked (keyword + one-hop graph neighbours, plus vectors when embeddin
 1. Run `POST .../search` with `topK: 50` and your term.
 2. If the 50th result still has a non-trivial score (relative to the top), run again with a more specific query — the API will not return more than 50 in one call.
 3. For **exact-string** sweeps where keyword tokenization mangles your phrase (e.g. CJK punctuation boundaries, code identifiers with underscores), walk every `wiki/*.md` via `files` + `files/content` and grep client-side. Slow but reliable.
-4. Pure-semantic sweeps: set `topK: 50` and read `vectorScore` on each hit — pages without `vectorScore` matched only via keyword.
+4. Pure-semantic sweeps: set `topK: 50` and read `vectorScore` on each hit.
 
 ---
 
@@ -296,7 +292,7 @@ The desktop UI's active project does **not** change just because you used a diff
 
 - **Don't call a route that changes state unless the user explicitly asked.** This covers review `PATCH`, `DELETE` and `resolve`, `pages/write`, `pages/embed`, `chat` and `sources/rescan`. Don't call them to explore, to check that a route exists or to prepare an answer, and don't guess the bodies that are not documented in `api-reference.md`.
 - **Don't paginate the file tree with maxFiles=1, maxFiles=2, …** — `files` has no offset or cursor (only `graph` is paginated), and exceeding `maxFiles` returns 413. Use a higher cap or filter by `root=`.
-- **Don't edit `wiki/**` behind the app's back.** Direct filesystem edits to wiki pages skip merge, ingest cache and file history, and do not trigger ingest; make the change in the desktop app. Adding files to `raw/sources/**` from outside is fine: the app's watcher sees them and queues ingest under the conditions of the "re-index" recipe.
+- **Don't bypass the API for writes.** The API is read-mostly. Writing to `wiki/**` or `raw/sources/**` via the filesystem directly bypasses the file-sync watcher. Use the desktop UI's Sources → Import flow or the ingest pipeline.
 - **Don't include the token in URLs you echo / log / show.** Use headers in any output visible to the user.
 - **Don't retry blindly on 429 / 503** — the server sends no known `Retry-After`, so wait explicitly: at least 1 s on 429 and at least 2 s on 503 (your own caution).
 - **Don't shell out to a wrapper script.** The API is the contract. Direct `curl` / `fetch` is the interface.

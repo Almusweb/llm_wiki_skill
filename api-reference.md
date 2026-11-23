@@ -55,8 +55,7 @@ Use them only when the user explicitly asks for that action. Review changes, `so
 }
 ```
 
-`/health` also answers without the prefix (`GET /health`) and to
-`POST`.
+`/health` also answers without the prefix (`GET /health`).
 
 Field reference:
 
@@ -98,7 +97,7 @@ Field reference:
 }
 ```
 
-`currentProject` belongs to this response, not to `/health`. The list can hold several projects: work only on the ones the user means. Paths use forward slashes on Windows (`C:/...`).
+`currentProject` belongs to this response, not to `/health`. The list can hold several projects: work only on the ones the user means.
 
 The `current` flag is true for the project the desktop UI has set as current; the literal `current` in `{id}` resolves to that project. Use it when the user doesn't name a project explicitly.
 
@@ -161,9 +160,9 @@ Query params:
 
 | Param | Default | Notes |
 |---|---|---|
-| `root` | `wiki` | One of `wiki` / `sources` (alias `raw`, `raw/sources`) / `all`; anything else → 400. `wiki` and `sources` list the folder's **content** (no container node); `all` returns 4 entries: `purpose.md`, `schema.md`, `wiki`, `sources`. |
-| `recursive` | `true` | `false` → only one level (directories then have `size` and `children` = `null`). Any value other than `false` counts as `true`. |
-| `maxFiles` | `2000` | Clamped to `[1, 10000]` (`0` → 1, non-numeric → default). Exceed → **413** `"File listing exceeds maxFiles limit (N)"`. |
+| `root` | `wiki` | One of `wiki` / `sources` (alias `raw`, `raw/sources`) / `all`. `all` lists every public sub-tree (`purpose.md`, `schema.md`, `wiki/`, `raw/sources/`). |
+| `recursive` | `true` | `false` → only one level. |
+| `maxFiles` | `2000` | Clamped to `[1, 10000]`. Exceed → **413**. |
 
 Response:
 
@@ -223,9 +222,9 @@ Response:
 
 Failure modes:
 
-- `400` — `path` parameter missing (`"Missing path query parameter"`)
-- `403` — path outside the allow-list (e.g., `../app-state.json`, `.llm-wiki/foo.json`, encoded `..`, directories, dotfiles, empty `path=`)
-- `404` — file does not exist (the message includes the OS error text)
+- `400` — `path` parameter missing
+- `403` — path outside the allow-list (e.g., `../app-state.json`, `.llm-wiki/foo.json`)
+- `404` — file does not exist
 - `413` — file > 2 MB
 - `415` — file is binary / non-UTF-8 (e.g., PNG, PDF), or its extension is not in the readable list (e.g., `rtf`). Use the desktop UI to view; the API is text-only.
 
@@ -250,12 +249,12 @@ Body:
 
 | Field | Default | Notes |
 |---|---|---|
-| `query` | (required) | Non-empty. Empty / whitespace-only → 400 `"query is required"`; missing or non-string → 400. |
-| `topK` | `10` | Clamped to `[1, 50]` (`0` → 1, `999` → 50); negative or non-numeric → 400. |
-| `includeContent` | `false` | When `true`, each hit carries `content` (full markdown). Skip the per-page content fetch round-trip. Must be a JSON boolean (`"yes"` → 400). |
-| `queryEmbedding` | `null` | Optional `number[]`. If you precomputed a query embedding (your own model, batched offline), pass it here and the server skips its own embed call. Must be a non-empty array of finite numbers, otherwise → 400. A vector of the wrong dimension is silently ignored (`vectorHits: 0`). |
+| `query` | (required) | Non-empty. Empty / whitespace-only → 400. |
+| `topK` | `10` | Clamped to `[1, 50]`. |
+| `includeContent` | `false` | When `true`, each hit carries `content` (full markdown). Skip the per-page content fetch round-trip. |
+| `queryEmbedding` | `null` | Optional `number[]`. If you precomputed a query embedding (your own model, batched offline), pass it here and the server skips its own embed call. Must be a non-empty array of finite numbers, otherwise → 400. |
 
-`limit` is **not** a search parameter: it is ignored. Only `wiki/**/*.md` is searched; `raw/sources/` is never
+Only `wiki/**/*.md` is searched; `raw/sources/` is never
 searched. The scan covers at most 10,000 files: after that it stops and the app writes a message to its own
 stderr. The response has no field that reports this, so a wiki with more than 10,000 `.md` files can return
 results from only part of it, and which files are left out is not defined.
@@ -270,7 +269,7 @@ Response:
   "tokenHits": 78,
   "vectorHits": 14,
   "graphHits": 3,
-  "note": "Search uses the shared backend hybrid retrieval service, combining keyword, vector, and one-hop knowledge-graph candidates...",
+  "note": "Search uses the shared backend retrieval service. When embeddingConfig is enabled, the API automatically includes LanceDB vector results; clients may also pass queryEmbedding explicitly.",
   "results": [
     {
       "path": "wiki/concepts/rope.md",
@@ -294,7 +293,7 @@ them as a complete list.
 
 ### Retrieval mode
 
-0.6.13 (`commands/search.rs` 464, 541-551, 782-792):
+0.6.13 (`commands/search.rs`):
 
 | `mode` | Trigger | Score scale |
 |---|---|---|
@@ -308,12 +307,11 @@ have `vectorHits: 0`: without embeddings it means keyword + one-hop graph neighb
 
 The skill documents no numeric range for RRF scores, and none for scores with embeddings active: do not assume one.
 
-- **Keyword weights** (`search.rs` 14-20, 960-970): exact filename 200, phrase in title 50, phrase in content
+- **Keyword weights** (`search.rs`): exact filename 200, phrase in title 50, phrase in content
   20 per occurrence (max 10), each query token ×5 in the title and ×1 in the content.
 - **Graph share**: one-hop neighbours of the top hits take 15–30% of the `topK` window (30% when no vector
   matched, e.g. 3 of 10 and 15 of 50; none when `topK < 2`). Their snippet is "Graph neighbor of …" and
   `graphRelatedTo` marks them.
-- **Embeddings** only affect search (RRF, graph share); the `/graph` endpoint does not use them.
 
 `tokenHits` is the number of pages the keyword pass scored; `vectorHits` is the number of distinct pages LanceDB returned. Either can be 0.
 
@@ -323,13 +321,13 @@ The skill documents no numeric range for RRF scores, and none for scores with em
 |---|---|---|
 | `path` | yes | Project-relative path to the markdown page. |
 | `title` | yes | Front-matter `title:` if present; else first `# Heading`; else filename with dashes → spaces. |
-| `snippet` | yes | A short excerpt; its length is not fixed, so don't rely on one (on 0.6.13 it was observed shorter than older docs stated, with a trailing `...`, frontmatter text included, newlines flattened). In keyword mode: centered on the query/anchor token in the page body. In vector-only matches: the actual matching chunk text, optionally prefixed with the chunk's heading path (e.g. `"Section > Detail: chunk text..."`). |
+| `snippet` | yes | A short excerpt; its length is not fixed, so don't rely on one. In keyword mode: centered on the query/anchor token in the page body. In vector-only matches: the actual matching chunk text, optionally prefixed with the chunk's heading path (e.g. `"Section > Detail: chunk text..."`). |
 | `titleMatch` | yes | `true` when a token or phrase hit the title (boosts ranking). |
 | `score` | yes | Final ranking score. Its kind depends on `vectorHits` (additive keyword score, or RRF): see "Retrieval mode". |
 | `vectorScore` | optional | Composite per-page vector score when the page matched via the vector index: best chunk plus up to 30% of the other chunks, not above 1 — not a raw cosine. Copied into a result only when RRF is applied or for vector-only results; absent without vectors. |
 | `images` | yes | Embedded `![alt](url)` references discovered in the markdown, deduped by URL. Useful for the agent to surface diagrams. |
 | `content` | optional | Full markdown, only when `includeContent: true`. |
-| `graphRelatedTo` | optional | Titles of the hits this page is a graph neighbour of; present only on graph candidates. |
+| `graphRelatedTo` | optional | Present on graph candidates. |
 
 These are the fields the skill documents, not a complete list: a result can carry other fields.
 
@@ -346,12 +344,12 @@ Query params:
 | Param | Default | Notes |
 |---|---|---|
 | `q` | — | Substring filter on `id` or `label`, case-insensitive. Filters **nodes**; edges are only those between matching nodes, so `q` does not return a node's neighbours. |
-| `nodeType` | — | Filter on the page's `type:` (first `type:` line, lowercased; `other` if none). Examples: `entity`, `concept`, `other`. Exact match: an unknown value returns 0 nodes; `node_type` (snake_case) is ignored. |
+| `nodeType` | — | Filter on the page's `type:` (first `type:` line, lowercased; `other` if none). Examples: `entity`, `concept`, `other`. |
 | `limit` | `200` | Absent → `200`. A number above `1000` is clamped to `1000` (`5000` becomes `1000`); `0`, negative or non-numeric → 400. |
 | `offset` | — | Start of the page; use it with `limit` to read the next page while `hasMore` is true. |
 | `edgeScope` | `page` | `page`: an edge is returned only when both ends are nodes of the returned page. `filtered`: edges between the filtered nodes are returned, also when an end is outside the page. Any other value → 400. |
 
-`nodeType` is an open set derived from `type:`, not a fixed list; the examples above are not complete. Pages with `type: query` are **not** graph nodes (excluded on purpose, with their edges).
+`nodeType` is an open set derived from `type:`, not a fixed list; the examples above are not complete. Pages with `type: query` are **not** graph nodes (excluded, with their edges).
 
 Pagination applies to `graph` only: the `files` tree has no pagination.
 
@@ -386,7 +384,7 @@ Response:
 
 `offset`, `limit`, `totalCount` and `hasMore` are the pagination fields. Read `hasMore` before requesting another page.
 
-Edges are derived from `[[wikilink]]` references **and the frontmatter `related:` list** in `wiki/**/*.md`. Deduplicated by unordered pair `(source, target)` — `[[a]]` in b and `[[b]]` in a produce **one** edge. Self-edges are dropped. `weight` is `1.0`. Node `id` is the file stem, or the relative path when two pages share a stem; ambiguous links are dropped. The graph is rebuilt from the files on request and the backend keeps a 5 s cache of it; there is no indexing state and embeddings play no part.
+Edges are derived from `[[wikilink]]` references **and the frontmatter `related:` list** in `wiki/**/*.md`. Deduplicated by unordered pair `(source, target)` — `[[a]]` in b and `[[b]]` in a produce **one** edge. Self-edges are dropped. `weight` is `1.0`. Node `id` is the file stem, or the relative path when two pages share a stem; ambiguous links are dropped. The graph is rebuilt from the files on request and the backend keeps a 5 s cache of it.
 
 `linkCount` is the node's degree in the deduped graph.
 
@@ -429,7 +427,7 @@ project UUID, then `default`.
 
 ### When does ingest actually start
 
-0.6.13 (`file_sync.rs` 339-362, `project-file-sync.ts` 62-66 and 337-370, `source-lifecycle.ts` 258-285):
+0.6.13 (`file_sync.rs`, `project-file-sync.ts`, `source-lifecycle.ts`):
 
 - The rescan **does not queue into the app's ingest queue itself**. It updates the snapshot, queues the changes in the
   app's file-change queue and emits events to the desktop UI; the UI queues the ingest. Only `created` and `modified`
@@ -442,12 +440,7 @@ project UUID, then `default`.
   60 s. Whether the ingest starts for those projects is not documented here (the default of the option and whether an
   LLM is needed are not known): do not tell the user that it starts. The effect of a rescan of a project that is not
   open is not documented here either.
-- Files written into `raw/sources/` by other processes are picked up by the app's own watcher, without any rescan, with the project open.
-- An unchanged source is **not** ingested again: the ingest cache matches the hash of the extracted text, and
-  re-queuing from the UI hits the same cache. The cache key does not include `schema.md`, `purpose.md` or the model
-  (`ingest-cache.ts`).
-- Ingest progress is visible only in the desktop UI (Activity panel) or in `.llm-wiki/ingest-queue.json` on disk; the
-  API has no endpoint for it.
+- The ingest cache key does not include `schema.md`, `purpose.md` or the model (`ingest-cache.ts`).
 
 ---
 
@@ -522,7 +515,7 @@ The body limits, the rate limit and the in-flight limits come from the app code.
 CORS: the request `Origin` is reflected in `Access-Control-Allow-Origin` only for these origins: `chrome-extension://` and `moz-extension://` (any extension id), `localhost`, `127.0.0.1` and `[::1]` (with or without a port), `tauri://localhost` and `http(s)://tauri.localhost`. For any other origin the header is absent. The server never sends a wildcard origin. `Access-Control-Allow-Methods: GET, POST, PATCH, DELETE, OPTIONS`. A preflight response carries `Access-Control-Max-Age: 600`: a browser may cache it for 600 seconds (10 minutes). Allowed headers include `Authorization`, `X-LLM-Wiki-Token`, `Content-Type`.
 A request from an origin that is not in the list is still served. CORS only stops a browser page from reading the response; it is not access control. `OPTIONS` → 204 with the CORS headers, before every other check: no token is needed and the rate limit does not count it.
 
-**Methods.** The allowed methods are GET, POST, PATCH and DELETE. `OPTIONS` is the CORS preflight: it gets 204 before any other check, so it is never a 405. 405 appears only for other verbs (e.g. `PUT`), and in the app code only after the token check. A wrong verb among the four allowed ones (e.g. `GET .../search`, `POST /projects`, `DELETE /projects`) → **404**, not 405. The old rule "every verb except GET and POST gives 405" does not hold on 0.6.13. Without a valid token the API answered 401 also for unknown routes and wrong methods.
+**Methods.** The allowed methods are GET, POST, PATCH and DELETE. `OPTIONS` is the CORS preflight: it gets 204 before any other check, so it is never a 405. 405 appears only for other verbs (e.g. `PUT`), and in the app code only after the token check. A wrong verb among the four allowed ones (e.g. `GET .../search`, `POST /projects`, `DELETE /projects`) → **404**, not 405. Without a valid token the API answered 401 also for unknown routes and wrong methods.
 
 ---
 
@@ -540,9 +533,8 @@ There is no difference of auth scheme between loopback and LAN: the token is the
 
 ### GET /projects/{id}/reviews
 
-Query: `status` = `unresolved` (default, alias `pending`) | `resolved` | `all` (else 400; case-sensitive, `ALL` → 400);
-`type` exact match (an unknown type → 200 with an empty list); `limit` default 200, clamped to 1-1000
-(non-numeric → ignored, no 400).
+Query: `status` = `unresolved` (`pending` is accepted and reported as `unresolved`) | `resolved` | `all` (case-sensitive: `ALL` → 400);
+`type` exact match (an unknown type → 200 with an empty list); `limit` (non-numeric → ignored, no 400).
 
 ```json
 { "ok": true, "projectId": "...", "status": "unresolved", "count": 1,
@@ -552,11 +544,9 @@ Query: `status` = `unresolved` (default, alias `pending`) | `resolved` | `all` (
                  "resolved": false, "createdAt": 1700000000000.0 } ] }
 ```
 
-Fields are present only if stored: `resolvedAction` is absent on unresolved items, `searchQueries` may be
-missing. `sourcePath` is the **absolute** path of the source; `createdAt` is a JSON float (ms). The id is
-`review-` + FNV-1a 32-bit of `type::normalized title`, so the same review from a re-ingest merges into the existing
-item, and a resolved item stays resolved (`review-store.ts`). When the ingest queue drains, the app may resolve
-items by itself (`resolvedAction` `auto-resolved` or `llm-judged`) (`sweep-reviews.ts`).
+`resolvedAction` is absent on unresolved items. `sourcePath` is the **absolute** path of the source; `createdAt` is a
+JSON floating-point number. The id is `review-` + FNV-1a 32-bit of `type::normalized title` (`review-store.ts`).
+When the ingest queue drains, the app may resolve items by itself (`resolvedAction` `auto-resolved` or `llm-judged`) (`sweep-reviews.ts`).
 
 ### PATCH, DELETE and POST /projects/{id}/reviews/...
 

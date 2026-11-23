@@ -52,7 +52,7 @@ No scripts, no wrappers. If you find yourself wanting one, just `curl`.
 
 1. **LLM Wiki desktop app installed and running.** By default the API listens on `127.0.0.1:19828`, and only while the app is open (see "Security model" for LAN listening). If the app isn't running, the agent will see `connection refused` and tell you.
 
-2. **API server enabled.** Default: on. Verify in `Settings → API + MCP → "Enable local HTTP API"` is checked (the section was called "API Server" in older builds).
+2. **API server enabled.** Default: on. Verify in `Settings → API + MCP → "Enable local HTTP API"` is checked.
 
 3. **Token configured.** Default: off (token field empty → every endpoint returns 401). Either:
    - In the app: `Settings → API + MCP → Generate new token`. Copy and stash it.
@@ -110,13 +110,13 @@ Add `| jq` at the end of any of these if you have `jq` installed and want pretty
 | Every endpoint returns 503 with "busy" | In-flight cap reached (64 concurrent; 8 chat streams, 4 page embeds on 0.6.13) | Send fewer parallel requests and wait at least 2 s before retrying (your own caution; not tested under load). |
 | 429 on rapid requests | Rate limit: 120 requests per 1 s window, global (`/health` and `OPTIONS` not counted); no `Retry-After` header is known | Wait at least 1 s (your own caution; not tested under load). |
 | `files` returns 413 | Tree larger than `maxFiles` | Raise `maxFiles` (max 10000) or narrow `root=`. |
-| Rescan lists files but nothing is ingested | For the project open in the app, the UI queues the ingest only with Source Watch `enabled` + `autoIngest` and a usable LLM. For a project that is not open it depends on the "Watch all projects" option, and the skill does not know whether the ingest starts. Unchanged sources hit the ingest cache | Open the project in the app, check Settings → Source Watch, see `api-reference.md` → "When does ingest actually start". |
+| Rescan lists files but nothing is ingested | For the project open in the app, the UI queues the ingest only with Source Watch `enabled` + `autoIngest` and a usable LLM. For a project that is not open it depends on the "Watch all projects" option, and the skill does not know whether the ingest starts. | Open the project in the app, check Settings → Source Watch, see `api-reference.md` → "When does ingest actually start". |
 | `files/content` returns 415 on `.pdf` | API is text-only | Read source PDFs via the desktop UI; only text-ish extensions are exposed. |
 | `tokenSource: "env"` even though I cleared it from UI | `LLM_WIKI_API_TOKEN` env var is set somewhere | `unset LLM_WIKI_API_TOKEN`; or set its value to match what's in your UI. |
 
 ## Security model
 
-- The API listens on `127.0.0.1` by default. This is a default, not a guarantee. On 0.6.13 the option "Allow API and Clip server access from the local network" (`allowLanAccess`) makes it listen on `0.0.0.0`. The environment variable `LLM_WIKI_BIND_HOST` takes precedence over that option.
+- The API listens on `127.0.0.1` by default. This is a default, not a guarantee. On 0.6.13 the `allowLanAccess` setting makes it listen on `0.0.0.0`. The environment variable `LLM_WIKI_BIND_HOST` takes precedence over that option.
 - The listen address is applied when the server binds, not on each request, so a changed option needs a new bind (an app restart gives one). `/health` → `allowLanAccess` shows the setting, not the current bind.
 - Loopback and LAN use the same auth scheme, and the API uses plain HTTP. **With LAN listening the token travels in clear text on the network.** Turn the option on only on a network you trust. This is how the app code behaves; it was not tested by running the app.
 - Token-based auth is constant-time compared (no timing leak in the auth check).
