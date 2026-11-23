@@ -159,7 +159,7 @@ For graph / cross-reference questions:
 
 For "I added new docs" requests:
 
-- `POST /api/v1/projects/{id}/sources/rescan` → returns `{ queue: { tasks }, changedTasks: [...] }`. Tell the user how many files changed. **This does not prove that ingest was queued** — see `api-reference.md` → "When does ingest actually start".
+- `POST /api/v1/projects/{id}/sources/rescan` → returns `{ queue: { tasks }, changedTasks: [...] }`. Tell the user how many files changed. An empty `changedTasks` means the app has already seen the changes. A non-empty list **does not prove that ingest was queued**: only `created` and `modified` files start it, and only under the conditions in `api-reference.md` → "When does ingest actually start".
 
 ## Endpoint contract (v1)
 
@@ -171,7 +171,7 @@ For "I added new docs" requests:
 | GET | `/api/v1/projects/{id}/files/content?path=wiki/foo.md` | Text files only: md, mdx, txt, csv, json, yaml, yml, xml, html, htm, log. `rtf` is not readable (415). 2 MB max. 400 if `path` is missing, 403 on out-of-scope path (also `.llm-wiki/`, `..`, dot-segments, directories), 415 on binary, 413 on oversize. |
 | POST | `/api/v1/projects/{id}/search` | Body: `{ "query": "...", "topK": 10, "includeContent": false, "queryEmbedding": null }` (`queryEmbedding`: optional precomputed `number[]`; `limit` is ignored). Keyword + one-hop graph candidates, plus vectors when embeddings are configured; see "Reading the score". Response includes `mode`, `tokenHits`, `vectorHits`, `graphHits` and `results`; don't treat the lists of response and result fields as complete. Searches `wiki/**/*.md` only, at most 10,000 files, with no truncation signal in the response. `content` is absent (not `null`) unless `includeContent: true`. Empty query → 400. |
 | GET | `/api/v1/projects/{id}/graph?q=&nodeType=&limit=200&offset=0&edgeScope=page` | Graph from `wiki/**/*.md` wikilinks and `related:`. `limit` defaults to 200 and is clamped to 1–1000 (5000 becomes 1000; `0`, negative or non-numeric → 400). **0.6.13+:** `offset` and `edgeScope` (`page` \| `filtered`; any other value → 400) for pagination; response adds `offset`, `limit`, `totalCount`, `hasMore`. `q` filters nodes only. Pages with `type: query` are not nodes. The backend caches the graph for 5 s. |
-| POST | `/api/v1/projects/{id}/sources/rescan` | Triggers a backend rescan using the user's Source Watch config. Returns post-rescan queue + changed tasks. Does **not** itself queue ingest: see `api-reference.md`. |
+| POST | `/api/v1/projects/{id}/sources/rescan` | Triggers a backend rescan using the user's Source Watch config. It updates the file snapshot and returns the post-rescan queue and `changedTasks`. It does **not** itself queue ingest in the app: see `api-reference.md`. |
 | GET | `/api/v1/projects/{id}/reviews?status=&type=&limit=` | 0.6.13. Reads the review items. Filters and fields: `api-reference.md` → "GET /projects/{id}/reviews". |
 | PATCH | `/api/v1/projects/{id}/reviews/{reviewId}` | 0.6.13. **Writes**: rewrites `.llm-wiki/review.json` of the project in `{id}`. The request body is not documented here. |
 | DELETE | `/api/v1/projects/{id}/reviews/{reviewId}` | 0.6.13. **Writes**: rewrites `.llm-wiki/review.json` of the project in `{id}`. |

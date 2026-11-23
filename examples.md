@@ -145,10 +145,11 @@ The user's `purpose.md` describes intent; `index.md` enumerates pages; `overview
 
 ## "I added new docs to the source folder — re-index"
 
-0. Check `GET /api/v1/projects`: the target project should be the one with `current: true`. Ingest is queued by the desktop UI, only for the project **open in the UI** (unless "Watch all projects" is on), with Source Watch `enabled` + `autoIngest` and a usable LLM. If the project is not open, tell the user to open it first.
+0. Check `GET /api/v1/projects`: the target project should be the one with `current: true`. Ingest is queued by the desktop UI for the project **open in the UI**, with Source Watch `enabled` + `autoIngest` and a usable LLM. For a project that is not open it depends on the "Watch all projects" option, and the skill does not know whether the ingest starts: do not promise it. If the project is not open, tell the user to open it first.
 1. `POST /api/v1/projects/{id}/sources/rescan`
 2. Read back `changedTasks`. Report:
-   - "Detected N new / M modified / K deleted files."
+   - "Detected N `created` and M `modified` files." Name any other `kind` as it appears, without explaining it.
+   - Only `created` and `modified` files under `raw/sources/` start an ingest.
    - List the first ~5 file paths so the user can verify.
 3. Tell the user the **actual ingest** runs asynchronously in the desktop queue, and only under the conditions in step 0 — encourage them to open the Activity panel to confirm it started.
 
@@ -161,11 +162,28 @@ Often no rescan is needed: with the project open, the app's watcher picks up fil
 
 If `changedTasks` is empty:
 
-> No new changes since the app last looked. Each change is reported once, so files the watcher already saw are not listed again, even if they were not ingested. If you added files and nothing appears in the Activity panel, check that the project is open and `Settings → Source Watch` (`enabled`, `autoIngest`, filters: e.g. `.json` is excluded by default).
+> No new changes: the app has already seen them. Each change is reported once, so files the watcher already saw are not listed again, even if they were not ingested. If you added files and nothing appears in the Activity panel, check that the project is open and `Settings → Source Watch` (`enabled`, `autoIngest`, filters: e.g. `.json` is excluded by default).
 
 An **unchanged** source is never ingested again, whether by rescan or by re-queuing it in the UI: the ingest cache
 matches the hash of the extracted text, and editing `schema.md` / `purpose.md` or switching model does not invalidate it
 .
+
+---
+
+## "What is waiting for my review?" (0.6.13)
+
+Read only. The review items are what the app flags after an ingest (for example a suggestion to create a page).
+
+1. `GET /api/v1/projects/current/reviews?status=unresolved&limit=20` (use the project id if the user named another project).
+
+   ```bash
+   curl -s -H "Authorization: Bearer $TOKEN" \
+     "$BASE/api/v1/projects/current/reviews?status=unresolved&limit=20"
+   ```
+
+2. Report `count`, then for each item in `reviews` its `type`, `title` and `description`. `sourcePath` is an **absolute** path: show only the part after the project folder.
+3. If the user asks for items already handled, use `status=resolved` or `status=all`. To narrow the list, use `type=` (exact match; an unknown type gives an empty list).
+4. Stop at reading. `PATCH`, `DELETE` and `resolve` rewrite `.llm-wiki/review.json` of the project in `{id}` and their request bodies are not documented in `api-reference.md`. If the user asks to change an item, say that the skill does not document the body; do not guess it.
 
 ---
 

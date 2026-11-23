@@ -418,10 +418,11 @@ No body required.
 }
 ```
 
-`changedTasks` contains the files this rescan **actually detected as changed** (created / modified / deleted) against the
-app's file snapshot. The scan also covers `wiki/**/*.md`, `purpose.md` and `schema.md`, not only `raw/sources`.
-Each change is reported **once**: the snapshot is updated before the response, so a second rescan returns an empty list
-even if nothing was ingested.
+`changedTasks` contains the files this rescan **actually detected as changed** against the app's file snapshot; `kind`
+says what kind of change it is (`created` in the example). Only `created` and `modified` start ingest; the other values of
+`kind` are not documented here. The scan also covers `wiki/**/*.md`, `purpose.md` and `schema.md`, not only `raw/sources`.
+Each change is reported **once**: the rescan updates the snapshot, so a second rescan without new changes returns an
+empty list even if nothing was ingested. An empty `changedTasks` therefore means the changes were already seen.
 
 The user's `sourceWatchConfig` (file type filters, exclude dirs, max size) is honored, read from the app state for the
 project UUID, then `default`.
@@ -430,12 +431,17 @@ project UUID, then `default`.
 
 0.6.13 (`file_sync.rs` 339-362, `project-file-sync.ts` 62-66 and 337-370, `source-lifecycle.ts` 258-285):
 
-- The rescan **does not queue ingest itself**. It updates the snapshot and emits an event to the desktop UI; the UI
-  queues `created` / `modified` files under `raw/sources/`, and only if **all** of these hold:
-  - the project is the one **open in the UI** (events for other projects are dropped), unless the global option
-    "Watch all projects" is on (off by default; it rescans recent inactive projects every 60 s);
+- The rescan **does not queue into the app's ingest queue itself**. It updates the snapshot, queues the changes in the
+  app's file-change queue and emits events to the desktop UI; the UI queues the ingest. Only `created` and `modified`
+  files under `raw/sources/` start it.
+- For the project **open in the UI**, the ingest starts only if **all** of these hold:
   - Source Watch `enabled` and `autoIngest` are on for the project;
   - an LLM usable for the ingest task is configured.
+- For a project that is **not open**, the app's listener for file changes ignores its events. Only the global option
+  "Watch all projects" adds a path: with it on, the app rescans recent projects that have Source Watch `enabled` every
+  60 s. Whether the ingest starts for those projects is not documented here (the default of the option and whether an
+  LLM is needed are not known): do not tell the user that it starts. The effect of a rescan of a project that is not
+  open is not documented here either.
 - Files written into `raw/sources/` by other processes are picked up by the app's own watcher, without any rescan, with the project open.
 - An unchanged source is **not** ingested again: the ingest cache matches the hash of the extracted text, and
   re-queuing from the UI hits the same cache. The cache key does not include `schema.md`, `purpose.md` or the model
