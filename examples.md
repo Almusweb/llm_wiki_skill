@@ -280,7 +280,7 @@ The desktop UI's active project does **not** change just because you used a diff
 - **Don't paginate the file tree with maxFiles=1, maxFiles=2, …** — `files` has no offset or cursor (only `graph` is paginated), and exceeding `maxFiles` returns 413. Use a higher cap or filter by `root=`.
 - **Don't edit `wiki/**` behind the app's back.** Direct filesystem edits to wiki pages skip merge, ingest cache and file history, and do not trigger ingest; make the change in the desktop app. Adding files to `raw/sources/**` from outside is fine: the app's watcher sees them and queues ingest under the conditions of the "re-index" recipe.
 - **Don't include the token in URLs you echo / log / show.** Use headers in any output visible to the user.
-- **Don't retry blindly on 429 / 503** — back off explicitly (1s / 2s respectively).
+- **Don't retry blindly on 429 / 503** — the server sends no known `Retry-After`, so wait explicitly: at least 1 s on 429 and at least 2 s on 503 (your own caution).
 - **Don't shell out to a wrapper script.** The API is the contract. Direct `curl` / `fetch` is the interface.
 
 ---

@@ -183,17 +183,17 @@ Always treat the status code as the contract:
 | Status | Meaning | What to do |
 |---|---|---|
 | 200 | OK | Use `body.ok === true` belt-and-suspenders; payload is in the same object. |
-| 400 | Bad request | Show `body.error`. Typical: empty `query`, invalid `?root=`, oversized body. |
-| 401 | Unauthorized | Token missing/wrong. Checked before routing, so it also hides unknown routes. Tell user to set/regenerate in Settings → API + MCP. |
+| 400 | Bad request | Show `body.error`. Typical: empty `query`, invalid `?root=`, a `pages/write` body that is too large. |
+| 401 | Unauthorized | Token missing/wrong. Without a valid token the API answered 401 also for unknown routes and wrong methods, so a 401 does not prove that the route exists. Tell user to set/regenerate in Settings → API + MCP. |
 | 403 | Forbidden | Path traversal or out-of-scope (e.g. `../app-state.json`). Don't retry the same path. |
-| 404 | Not found | Unknown project id, unknown route, **or a known route with the wrong verb** (e.g. `GET .../search`). On unknown project, list projects first to recover. |
-| 405 | Method not allowed | Only for verbs outside GET/POST/PATCH/DELETE/OPTIONS (e.g. `PUT`). |
-| 413 | Payload too large | File > 2 MB, file tree > maxFiles, or request body > 1 MB. Suggest narrower scope. |
+| 404 | Not found | Unknown project id, unknown route, **or a wrong verb among GET, POST, PATCH and DELETE** (e.g. `GET .../search`). On unknown project, list projects first to recover. |
+| 405 | Method not allowed | Only for verbs outside GET, POST, PATCH and DELETE (e.g. `PUT`). `OPTIONS` is not a 405: it gets 204 with the CORS headers, before every other check. |
+| 413 | Payload too large | File > 2 MB or file tree > maxFiles. Suggest narrower scope. The status code for a request body over the generic 1 MiB limit is not known: do not rely on a specific one. |
 | 415 | Unsupported media | Binary or non-UTF-8 file content. API is text-only. |
-| 429 | Too many requests | Rate limit (120 req in a sliding 1 s window, global; `/health` and `OPTIONS` excluded). No `Retry-After` header. Back off ≥1 second. |
+| 429 | Too many requests | Rate limit: 120 requests in a 1 s window, global; `/health` and `OPTIONS` are not counted. It applies before the token check. Known from the app code; not tested under load. No `Retry-After` header is known (see `api-reference.md` → "Limits & defenses"): wait at least 1 second, as your own caution. |
 | 500 | Internal error | Log + report; don't loop. |
 | 501 | Not implemented | `/chat` stub on 0.4.x. Don't retry. |
-| 503 | Service unavailable | API toggled off (`error` contains "disabled"); in-flight cap (64) reached ("busy"); on 0.6.13 also more than 8 chat streams or more than 4 page embeds running. Back off ≥2s. |
+| 503 | Service unavailable | API toggled off (`error` contains "disabled"); in-flight cap (64) reached ("busy"); on 0.6.13 also more than 8 chat streams or more than 4 page embeds running. Known from the app code; not tested under load. No `Retry-After` header is known: wait at least 2 seconds, as your own caution. |
 
 If the HTTP call itself fails (connection refused / ENOTFOUND): the desktop app is **not running**. Tell the user: "Launch LLM Wiki, then re-try."
 
@@ -203,7 +203,7 @@ If the HTTP call itself fails (connection refused / ENOTFOUND): the desktop app 
 - **Stay read-only by default.** `sources/rescan` changes state. On 0.6.13 other POST, PATCH and DELETE routes exist and change state too: call them only after the user explicitly asked for that change.
 - **Don't dump full pages unless asked.** Snippet + path is usually enough. Pull full content only when reasoning genuinely needs it.
 - **Respect the project boundary.** The current project is the user's active context. Do not silently switch projects.
-- **Honor the rate limit.** 120 req/sec is plenty for sequential work, but parallel page reads can burst close to it. Batch where the API allows (`includeContent: true` on search avoids N+1 reads).
+- **Honor the rate limit.** 120 requests per 1 s window is plenty for sequential work, but parallel page reads can burst close to it. Batch where the API allows (`includeContent: true` on search avoids N+1 reads).
 - **Never leak the token.** Headers are safe; query params and your own output text are not.
 
 ## See also

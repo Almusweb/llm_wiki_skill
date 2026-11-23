@@ -441,21 +441,26 @@ project UUID, then `default`.
 
 | Limit | Value | Effect |
 |---|---|---|
-| Body size | 1 MiB | Exceed → 400. |
+| Request body, generic | 1 MiB | The status code for a body over the limit is not known: do not rely on a specific one. |
+| Request body, `chat` | 40 MiB | Limit of the app code; not tested by running the app. |
+| Request body, `pages/write` | about 12 MiB | Too large → 400. Limit of the app code; not tested by running the app. |
 | File content read | 2 MiB | Exceed → 413. |
 | File-tree node count | 10000 hard cap | Exceed → 413. |
 | Search `topK` | 50 max | Silently clamped. |
 | Graph `limit` | 1000 max | Values above 1000 silently clamped. `0`, negative or non-numeric → 400. |
-| Rate limit | 120 req/sec (global, sliding 1 s window; `/health` and OPTIONS excluded) | 429, **no `Retry-After` header** — back off ≥1s. |
-| In-flight requests | 64 concurrent | 503 "API server is busy" — back off ≥2s. |
-| Chat streams / page embeds | 8 / 4 concurrent | 503. |
+| Rate limit | 120 requests per 1 s window, global; `/health` and `OPTIONS` excluded; applied before the token check | 429. Wait at least 1 s (see `Retry-After` below). |
+| In-flight requests | 64 concurrent | 503 "API server is busy". Wait at least 2 s (see `Retry-After` below). |
+| Chat streams in flight | 8 concurrent | 503. |
+| Page embeds in flight | 4 concurrent | 503. |
 
-CORS: the request `Origin` is reflected in `Access-Control-Allow-Origin` only for these origins: `chrome-extension://` and `moz-extension://` (any extension id), `localhost`, `127.0.0.1` and `[::1]` (with or without a port), `tauri://localhost` and `http(s)://tauri.localhost`. For any other origin the header is absent. The server never sends a wildcard origin. `Access-Control-Allow-Methods: GET, POST, PATCH, DELETE, OPTIONS`. Preflight cached 10 min via `Access-Control-Max-Age: 600`. Allowed headers include `Authorization`, `X-LLM-Wiki-Token`, `Content-Type`.
-A request from an origin that is not in the list is still served. CORS only stops a browser page from reading the response; it is not access control. `OPTIONS` → 204 without auth.
+The body limits, the rate limit and the in-flight limits come from the app code. They were not tested by running the app: the 429 and 503 responses were not seen under load.
 
-Non-`GET` / non-`POST` methods → 405 (**0.4.x only**). In 0.6.13: 405 only for verbs outside
-GET/POST/PATCH/DELETE/OPTIONS (e.g. `PUT`), after the auth check; a known route with the wrong verb (e.g. `GET .../search`,
-`POST /projects`) → **404**.
+**`Retry-After`.** Do not assume that the server sends it. In the response paths known for 0.6.13, 429 and 503 carry no `Retry-After` header (the headers of a successful SSE response are not known). The waits suggested here, at least 1 s after a 429 and at least 2 s after a 503, are the agent's own caution, not a value from the server.
+
+CORS: the request `Origin` is reflected in `Access-Control-Allow-Origin` only for these origins: `chrome-extension://` and `moz-extension://` (any extension id), `localhost`, `127.0.0.1` and `[::1]` (with or without a port), `tauri://localhost` and `http(s)://tauri.localhost`. For any other origin the header is absent. The server never sends a wildcard origin. `Access-Control-Allow-Methods: GET, POST, PATCH, DELETE, OPTIONS`. A preflight response carries `Access-Control-Max-Age: 600`: a browser may cache it for 600 seconds (10 minutes). Allowed headers include `Authorization`, `X-LLM-Wiki-Token`, `Content-Type`.
+A request from an origin that is not in the list is still served. CORS only stops a browser page from reading the response; it is not access control. `OPTIONS` → 204 with the CORS headers, before every other check: no token is needed and the rate limit does not count it.
+
+**Methods.** The allowed methods are GET, POST, PATCH and DELETE. `OPTIONS` is the CORS preflight: it gets 204 before any other check, so it is never a 405. 405 appears only for other verbs (e.g. `PUT`), and in the app code only after the token check. A wrong verb among the four allowed ones (e.g. `GET .../search`, `POST /projects`, `DELETE /projects`) → **404**, not 405. The old rule "every verb except GET and POST gives 405" does not hold on 0.6.13. Without a valid token the API answered 401 also for unknown routes and wrong methods.
 
 ---
 

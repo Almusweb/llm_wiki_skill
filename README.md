@@ -107,8 +107,8 @@ Add `| jq` at the end of any of these if you have `jq` installed and want pretty
 | `Status: port_conflict` in `/health` | Another process on 19828 | `lsof -i :19828` to find the squatter; quit and restart the app. |
 | Every endpoint returns 401 | No token configured | Settings → API + MCP → Generate; OR `export LLM_WIKI_API_TOKEN=...` |
 | Every endpoint returns 503 with "disabled" | Kill switch is on | Settings → API + MCP → check "Enable local HTTP API". |
-| Every endpoint returns 503 with "busy" | In-flight cap reached (64 concurrent; 8 chat streams, 4 page embeds on 0.6.13) | Back off, send fewer parallel requests. |
-| 429 on rapid requests | Rate limit: 120 req/sec global, no `Retry-After` header | Back off ≥1s. |
+| Every endpoint returns 503 with "busy" | In-flight cap reached (64 concurrent; 8 chat streams, 4 page embeds on 0.6.13) | Send fewer parallel requests and wait at least 2 s before retrying (your own caution; not tested under load). |
+| 429 on rapid requests | Rate limit: 120 requests per 1 s window, global (`/health` and `OPTIONS` not counted); no `Retry-After` header is known | Wait at least 1 s (your own caution; not tested under load). |
 | `files` returns 413 | Tree larger than `maxFiles` | Raise `maxFiles` (max 10000) or narrow `root=`. |
 | Rescan lists files but nothing is ingested | Ingest is queued by the UI only for the open project, with Source Watch `enabled` + `autoIngest` and a usable LLM; unchanged sources hit the ingest cache | Open the project in the app, check Settings → Source Watch, see `api-reference.md` → "When does ingest actually start". |
 | `files/content` returns 415 on `.pdf` | API is text-only | Read source PDFs via the desktop UI; only text-ish extensions are exposed. |
@@ -122,7 +122,7 @@ Add `| jq` at the end of any of these if you have `jq` installed and want pretty
 - Token-based auth is constant-time compared (no timing leak in the auth check).
 - Path traversal blocked at the route handler (`safe_join` with canonical-path prefix check).
 - File reads restricted to a whitelist (`purpose.md`, `schema.md`, `wiki/**`, `raw/sources/**`); text extensions only; 2 MB cap.
-- Body limit 1 MB; in-flight cap 64; rate limit 120/sec.
+- Generic body limit 1 MiB; in-flight cap 64; rate limit 120 requests per 1 s window. Details in `api-reference.md` → "Limits & defenses".
 - v1 had no write endpoints. `/sources/rescan` changes state. On 0.6.13 other POST, PATCH and DELETE routes exist and change state too.
 
 What's **not** in the threat model:
