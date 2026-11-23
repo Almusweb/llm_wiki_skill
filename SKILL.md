@@ -80,7 +80,7 @@ The token is one of:
 2. The user's `apiConfig.token` saved in Settings → **API + MCP** (labelled "API Server" in older builds and in some messages)
 3. `allowUnauthenticated: true` mode (no token needed; rare, user opt-in only). In this mode `projects`, `files`, `files/content`, `reviews`, `search`, `graph` and `sources/rescan` stay open. `chat`, `chat/{sessionId}/cancel`, `pages/embed` and `pages/write` always require the token. See `api-reference.md` → `allowUnauthenticated`.
 
-Always check `/api/v1/health` first — it returns `{ enabled, authConfigured, allowUnauthenticated, tokenSource }`. **If `authConfigured: false && allowUnauthenticated: false`, ask the user to open `Settings → API + MCP → Generate new token`**. Do not proceed without auth being set up.
+Always check `/api/v1/health` first — it returns `ok`, `status`, `version`, `enabled`, `authRequired`, `authConfigured`, `allowUnauthenticated` and `tokenSource`; app 0.6.13 adds `mcpEnabled`, `allowLanAccess` and `agent` (`chat`, `streaming`, `streamProtocol`). The auth check uses `authConfigured` and `allowUnauthenticated`. **If `authConfigured: false && allowUnauthenticated: false`, ask the user to open `Settings → API + MCP → Generate new token`**. Do not proceed without auth being set up.
 
 Three equivalent ways to send the token:
 
@@ -97,7 +97,7 @@ X-LLM-Wiki-Token: <token>              # alternative header
 When the user asks "look it up in my wiki":
 
 1. **Resolve project** (see [Project resolution](#project-resolution) below).
-2. **Search**: `POST /api/v1/projects/{id}/search` with `{ query, topK: 5..10 }` → ranked hits (`path`, `title`, `snippet`, `score`, `titleMatch`, optional `vectorScore`, `images`, and `graphRelatedTo` on graph candidates). Inspect `vectorHits` / `graphHits` (not just `mode`) to know what kicked in — see below. Search only covers `wiki/**/*.md`, never `raw/sources/`.
+2. **Search**: `POST /api/v1/projects/{id}/search` with `{ query, topK: 5..10 }` → ranked hits (for example `path`, `title`, `snippet`, `score`, `titleMatch`, optional `vectorScore`, and `graphRelatedTo` on graph candidates; this is not a complete list of result fields). Inspect `vectorHits` and `graphHits` (not just `mode`) to know what kicked in — see below. Search only covers `wiki/**/*.md` (never `raw/sources/`), at most 10,000 files; past that limit it stops and the response does not say so.
 3. **Read top hits**: for each promising hit, `GET /api/v1/projects/{id}/files/content?path=...` for the full markdown. Or pass `includeContent: true` to the search to avoid the round-trip.
 4. **Cite + answer**: synthesize an answer grounded in the read pages. **Quote the `path` of each page you used** so the user can verify and jump in-app.
 
@@ -105,11 +105,11 @@ When the user asks "look it up in my wiki":
 
 The `score` field's scale depends on **`vectorHits`**, not on `mode`:
 
-- **`vectorHits: 0`** (no embeddings configured, or no vector match) — additive keyword score. Weights: exact filename 200, phrase in title 50, phrase in content 20 per occurrence (max 10), each query token ×5 in the title and ×1 in the content.
-- **`vectorHits > 0`** — RRF (Reciprocal Rank Fusion) score, small absolute numbers; relative ordering is what matters. `vectorScore` is a blended per-page value in [0,1] (best chunk plus up to 30% of the other chunks), not a raw cosine.
-- **`mode`** is `"hybrid"` whenever `graphHits > 0`, **even with `vectorHits: 0`**: one-hop graph neighbours of the top hits take 15–30% of the `topK` window (30% when no vectors matched; none when `topK < 2`, which yields `mode: "keyword"`). Graph candidates carry `graphRelatedTo: [titles]` and the snippet "Graph neighbor of …", and are interleaved, so the list is not strictly sorted by `score`.
+- **`vectorHits: 0`** (no embeddings configured, or no vector match) — additive keyword score, even when `mode` is `"hybrid"`. Weights: exact filename 200, phrase in title 50, phrase in content 20 per occurrence (max 10), each query token ×5 in the title and ×1 in the content.
+- **`vectorHits > 0`** — RRF (Reciprocal Rank Fusion) is applied; it is applied only in this case. No numeric range is documented for RRF scores or for scores with embeddings, so do not assume one; relative ordering within the response is what matters. `vectorScore` is a composite per-page value (best chunk plus up to 30% of the other chunks, at most 1), not a raw cosine.
+- **`mode`** is `"hybrid"` whenever `graphHits > 0`, **even with `vectorHits: 0`**: one-hop graph neighbours of the top hits take 15–30% of the `topK` window (30% when no vectors matched; none when `topK < 2`, which yields `mode: "keyword"`). Graph candidates carry `graphRelatedTo: [titles]` and the snippet "Graph neighbor of …".
 
-Don't apply a fixed score threshold across modes. Rely on relative gaps within one response.
+Scores are not comparable between modes or between responses with different `vectorHits`. Don't apply a fixed score threshold; rely on relative gaps within one response.
 
 ### Project resolution
 
@@ -164,11 +164,11 @@ For "I added new docs" requests:
 
 | Method | Path | Notes |
 |---|---|---|
-| GET | `/api/v1/health` | No auth. Returns `{ ok, status, version, enabled, authRequired, authConfigured, allowUnauthenticated, tokenSource }`; 0.6.13 adds `mcpEnabled`, `allowLanAccess`, `agent`. |
+| GET | `/api/v1/health` | No auth. Returns `{ ok, status, version, enabled, authRequired, authConfigured, allowUnauthenticated, tokenSource }`; 0.6.13 adds `mcpEnabled`, `allowLanAccess` and `agent` (`{ chat, streaming, streamProtocol }`), and also answers on `/health` without the prefix. `allowLanAccess` shows the setting, not the listen address. |
 | GET | `/api/v1/projects` | List projects. Each: `{ id, name, path, current }`; 0.6.13 adds top-level `currentProject`. |
 | GET | `/api/v1/projects/{id}/files?root=wiki\|sources\|all&recursive=true&maxFiles=2000` | `root`: `wiki`, `sources` (alias `raw`, `raw/sources`) or `all`. Tree of `{ name, path, isDir, size, children }`. On 0.6.13 `path` is **absolute** (on Windows `//?/C:/...`): strip the project path to get the relative path for `files/content`. Exceeding `maxFiles` → **413**. Capped at 10000 nodes. |
 | GET | `/api/v1/projects/{id}/files/content?path=wiki/foo.md` | Text files only: md, mdx, txt, csv, json, yaml, yml, xml, html, htm, log. `rtf` is not readable (415). 2 MB max. 400 if `path` is missing, 403 on out-of-scope path (also `.llm-wiki/`, `..`, dot-segments, directories), 415 on binary, 413 on oversize. |
-| POST | `/api/v1/projects/{id}/search` | Body: `{ "query": "...", "topK": 10, "includeContent": false }` (`limit` is ignored). Keyword + one-hop graph candidates, plus vectors when embeddings are configured; see "Reading the score". Response: `mode`, `tokenHits`, `vectorHits`, `graphHits`, `results`. `content` is absent (not `null`) unless `includeContent: true`. Empty query → 400. |
+| POST | `/api/v1/projects/{id}/search` | Body: `{ "query": "...", "topK": 10, "includeContent": false, "queryEmbedding": null }` (`queryEmbedding`: optional precomputed `number[]`; `limit` is ignored). Keyword + one-hop graph candidates, plus vectors when embeddings are configured; see "Reading the score". Response includes `mode`, `tokenHits`, `vectorHits`, `graphHits` and `results`; don't treat the lists of response and result fields as complete. Searches `wiki/**/*.md` only, at most 10,000 files, with no truncation signal in the response. `content` is absent (not `null`) unless `includeContent: true`. Empty query → 400. |
 | GET | `/api/v1/projects/{id}/graph?q=&nodeType=&limit=200&offset=0&edgeScope=page` | Graph from `wiki/**/*.md` wikilinks and `related:`. `limit` 1–1000 (larger is clamped, 0/negative → 400). **0.6.13+:** `offset` (≥ 0) and `edgeScope` (`page` \| `filtered`) for pagination; response adds `offset`, `limit`, `totalCount`, `hasMore`. |
 | POST | `/api/v1/projects/{id}/sources/rescan` | Triggers a backend rescan using the user's Source Watch config. Returns post-rescan queue + changed tasks. Does **not** itself queue ingest: see `api-reference.md`. |
 | POST | `/api/v1/projects/{id}/chat` | **0.4.x: 501** — not implemented. Don't call. |

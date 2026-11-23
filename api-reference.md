@@ -52,6 +52,10 @@ Field reference:
 - `authConfigured` — `true` if env `LLM_WIKI_API_TOKEN` or `apiConfig.token` is set
 - `allowUnauthenticated` — no token needed for the open routes listed under the token forms above (rare; user opt-in only)
 - `tokenSource` — `env` / `store` / `none`. If `env`, the desktop UI token field is **ignored**.
+- `version` — the app version string (for example `"0.6.13"`).
+- `mcpEnabled` — 0.6.13: the app's MCP setting.
+- `allowLanAccess` — 0.6.13: the LAN listening setting. It shows the setting, not the address in use (see "Listen address").
+- `agent` — 0.6.13: `{ chat, streaming, streamProtocol }`. Observed on 0.6.13: `chat: true` and `streamProtocol: "sse"`.
 
 ---
 
@@ -237,8 +241,10 @@ Body:
 | `includeContent` | `false` | When `true`, each hit carries `content` (full markdown). Skip the per-page content fetch round-trip. Must be a JSON boolean (`"yes"` → 400). |
 | `queryEmbedding` | `null` | Optional `number[]`. If you precomputed a query embedding (your own model, batched offline), pass it here and the server skips its own embed call. Must be a non-empty array of finite numbers, otherwise → 400. A vector of the wrong dimension is silently ignored (`vectorHits: 0`). |
 
-`limit` is **not** a search parameter: it is ignored. Only `wiki/**/*.md` is searched (at most 10,000 files,
-scanning stops silently beyond that); `raw/sources/` is never searched.
+`limit` is **not** a search parameter: it is ignored. Only `wiki/**/*.md` is searched; `raw/sources/` is never
+searched. The scan covers at most 10,000 files: after that it stops and the app writes a message to its own
+stderr. The response has no field that reports this, so a wiki with more than 10,000 `.md` files can return
+results from only part of it, and which files are left out is not defined.
 
 Response:
 
@@ -269,7 +275,8 @@ Response:
 ```
 
 `graphHits` (0.6.13) is the number of one-hop graph candidates in `results`. `content` is **absent**, not `null`,
-unless `includeContent: true`.
+unless `includeContent: true`. The response and result examples show the fields known to the skill; don't treat
+them as a complete list.
 
 ### Retrieval mode
 
@@ -281,14 +288,17 @@ unless `includeContent: true`.
 | `"vector"` | `graphHits: 0`, vectors matched, keyword matched nothing. | RRF. |
 | `"hybrid"` | **`graphHits > 0`** (even with `vectorHits: 0`), or both keyword and vector matched. | RRF **only if `vectorHits > 0`**; otherwise additive keyword scores. |
 
-So `mode` alone does not tell you the score scale: look at `vectorHits`. Without embeddings `hybrid` means keyword +
-one-hop graph neighbours, with additive scores.
+So `mode` alone does not tell you what ran or the score scale: look at `vectorHits` and `graphHits`. `hybrid` can
+have `vectorHits: 0`: without embeddings it means keyword + one-hop graph neighbours, with additive keyword scores
+(no RRF). RRF is applied only when `vectorHits > 0`.
+
+The skill documents no numeric range for RRF scores, and none for scores with embeddings active: do not assume one.
 
 - **Keyword weights** (`search.rs` 14-20, 960-970): exact filename 200, phrase in title 50, phrase in content
   20 per occurrence (max 10), each query token ×5 in the title and ×1 in the content.
 - **Graph share**: one-hop neighbours of the top hits take 15–30% of the `topK` window (30% when no vector
-  matched, e.g. 3 of 10 and 15 of 50; none when `topK < 2`). Their score is the graph score divided by 61, their
-  snippet is "Graph neighbor of …", and they are interleaved, so `results` is **not** strictly sorted by `score`.
+  matched, e.g. 3 of 10 and 15 of 50; none when `topK < 2`). Their snippet is "Graph neighbor of …" and
+  `graphRelatedTo` marks them.
 - **Embeddings** only affect search (RRF, graph share); the `/graph` endpoint does not use them.
 
 `tokenHits` is the number of pages the keyword pass scored; `vectorHits` is the number of distinct pages LanceDB returned. Either can be 0.
@@ -299,15 +309,17 @@ one-hop graph neighbours, with additive scores.
 |---|---|---|
 | `path` | yes | Project-relative path to the markdown page. |
 | `title` | yes | Front-matter `title:` if present; else first `# Heading`; else filename with dashes → spaces. |
-| `snippet` | yes | ~160-char window (observed ~110 chars with a trailing `...`, frontmatter included, newlines flattened). In keyword mode: centered on the query/anchor token in the page body. In vector-only matches: the actual matching chunk text, optionally prefixed with the chunk's heading path (e.g. `"Section > Detail: chunk text..."`). |
+| `snippet` | yes | A short excerpt; its length is not fixed, so don't rely on one (on 0.6.13 it was observed shorter than older docs stated, with a trailing `...`, frontmatter text included, newlines flattened). In keyword mode: centered on the query/anchor token in the page body. In vector-only matches: the actual matching chunk text, optionally prefixed with the chunk's heading path (e.g. `"Section > Detail: chunk text..."`). |
 | `titleMatch` | yes | `true` when a token or phrase hit the title (boosts ranking). |
-| `score` | yes | Final ranking score. See "Retrieval mode" for scale. |
-| `vectorScore` | optional | Per-page vector score in [0,1] when the page matched via the vector index: best chunk plus up to 30% of the other chunks, capped at 1 — not a raw cosine. Absent on pure keyword hits. |
+| `score` | yes | Final ranking score. Its kind depends on `vectorHits` (additive keyword score, or RRF): see "Retrieval mode". |
+| `vectorScore` | optional | Composite per-page vector score when the page matched via the vector index: best chunk plus up to 30% of the other chunks, not above 1 — not a raw cosine. Copied into a result only when RRF is applied or for vector-only results; absent without vectors. |
 | `images` | yes | Embedded `![alt](url)` references discovered in the markdown, deduped by URL. Useful for the agent to surface diagrams. |
 | `content` | optional | Full markdown, only when `includeContent: true`. |
 | `graphRelatedTo` | optional | 0.6.13: titles of the hits this page is a graph neighbour of; present only on graph candidates. |
 
-Don't compare scores **across** responses with different `vectorHits` (keyword scores are 100×+ larger than RRF scores by construction). Rely on relative ordering within one response, keeping in mind that graph candidates are interleaved.
+These are the fields the skill documents, not a complete list: a result can carry other fields.
+
+Scores are not comparable **between modes** or between responses with different `vectorHits` (additive keyword score and RRF are different scales). Rely on relative order and gaps within one response; check `graphRelatedTo` to tell graph candidates from text matches.
 
 ---
 

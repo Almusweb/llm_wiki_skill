@@ -48,12 +48,12 @@ The score's scale depends on **`vectorHits`**, not on `mode` (`mode` is `hybrid`
 
 | Case | Typical `score` | What "good" looks like |
 |---|---|---|
-| `vectorHits: 0` | additive keyword score, tens to hundreds | A clear gap (2×+) between top result and the rest. |
-| `vectorHits > 0` | RRF, small values (`1/(60+rank)`-based) | Relative order only. |
+| `vectorHits: 0` | additive keyword score (sum of the keyword weights in `SKILL.md`), also when `mode` is `hybrid` | A clear gap (2×+) between top result and the rest. |
+| `vectorHits > 0` | RRF; no numeric range is documented, so assume none | Relative order only. |
 
-Results with `graphRelatedTo` are one-hop graph neighbours of the top hits, not text matches: they are interleaved, so the list is not strictly sorted. Treat them as "related", not as answers.
+Results with `graphRelatedTo` are one-hop graph neighbours of the top hits, not text matches. Treat them as "related", not as answers.
 
-**Don't apply a fixed threshold across responses.** Rely on the relative gap among the non-graph hits. Use `vectorScore` (when present) for "how strong was the semantic match": a blended per-page value in `[0, 1]`.
+**Don't apply a fixed threshold, and don't compare scores between modes or between responses with different `vectorHits`.** Rely on the relative gap among the non-graph hits. Use `vectorScore` (when present) for "how strong was the semantic match": a composite per-page value, not a raw cosine.
 
 Answer template:
 
@@ -171,7 +171,7 @@ matches the hash of the extracted text, and editing `schema.md` / `purpose.md` o
 
 ## "Find every page that mentions Y" (broad sweep)
 
-Search is ranked (keyword + one-hop graph neighbours, plus vectors when embeddings are configured), covers only `wiki/**/*.md` and is capped at 50 hits per call; graph neighbours take part of those 50. For **exhaustive** sweeps:
+Search is ranked (keyword + one-hop graph neighbours, plus vectors when embeddings are configured), covers only `wiki/**/*.md` (at most 10,000 files; past that it stops and the response does not say so) and is capped at 50 hits per call; graph neighbours take part of those 50. For **exhaustive** sweeps:
 
 1. Run `POST .../search` with `topK: 50` and your term.
 2. If the 50th result still has a non-trivial score (relative to the top), run again with a more specific query — the API will not return more than 50 in one call.

@@ -74,6 +74,7 @@ curl -s http://127.0.0.1:19828/api/v1/health
 # {
 #   "ok": true,
 #   "status": "running",
+#   "version": "0.6.13",
 #   "enabled": true,
 #   "authConfigured": true,
 #   "tokenSource": "env",
