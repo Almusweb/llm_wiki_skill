@@ -82,6 +82,8 @@ The token is one of:
 
 Always check `/api/v1/health` first — it returns `ok`, `status`, `version`, `enabled`, `authRequired`, `authConfigured`, `allowUnauthenticated` and `tokenSource`; on app 0.6.13 it also returns `mcpEnabled`, `allowLanAccess` and `agent` (`chat`, `streaming`, `streamProtocol`). The auth check uses `authConfigured` and `allowUnauthenticated`. **If `authConfigured: false && allowUnauthenticated: false`, ask the user to open `Settings → API + MCP → Generate new token`**. Do not proceed without auth being set up.
 
+Drift check: compare the `version` that `/health` reports with `0.6.13`, the app version this skill was verified on. If it is any other version, check `api-reference.md` for drift before relying on the contract verbatim.
+
 Three equivalent ways to send the token:
 
 ```

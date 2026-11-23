@@ -170,7 +170,7 @@ matches the hash of the extracted text, and editing `schema.md` / `purpose.md` o
 
 ---
 
-## "What is waiting for my review?" (0.6.13)
+## "What is waiting for my review?" (verified on 0.6.13)
 
 Read only. The review items are what the app flags after an ingest (for example a suggestion to create a page).
 
