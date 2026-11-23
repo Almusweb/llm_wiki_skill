@@ -91,7 +91,7 @@ const { content } = await r.json()
 
 ## "What pages link to X?" / "Show me the neighborhood of X"
 
-1. `GET /api/v1/projects/current/graph?limit=1000` — pull the graph (`limit` max 1000; if `hasMore: true`, page with `offset`).
+1. `GET /api/v1/projects/current/graph?limit=1000` — pull the graph (`limit` max 1000; if `hasMore: true`, request the next page with `offset`). With the default `edgeScope=page`, an edge is returned only when both its ends are on the same page.
 2. Find `nodes[i].id === X` (or label substring match).
 3. Filter `edges` for `source === X || target === X`. The other endpoint is a neighbor.
 
@@ -102,7 +102,7 @@ curl -s -H "Authorization: Bearer $TOKEN" "$BASE/api/v1/projects/current/graph?l
 `?q=rope` filters **nodes** by substring of `id` / `label` (case-insensitive) and returns only the edges between matching
 nodes: it does **not** return the neighbours of `rope` unless their names also contain `rope`. Use it to find
 the node, then steps 1-3 for the neighbourhood. With more than 1000 nodes, `edgeScope=filtered` returns, for each page of
-nodes, the edges towards all filtered nodes. Pages with `type: query` never appear in the graph.
+nodes, the edges towards all filtered nodes, also outside the page. Pages with `type: query` never appear in the graph.
 
 Render a small mermaid graph when the user wants a visual:
 
@@ -277,7 +277,7 @@ The desktop UI's active project does **not** change just because you used a diff
 ## Anti-patterns
 
 - **Don't `POST /chat`** — on 0.4.x it returns 501 (on 0.6.13 `/health` reports `agent.chat: true`). Use the desktop chat UI, or call your own LLM with the wiki content as context.
-- **Don't paginate the file tree with maxFiles=1, maxFiles=2, …** — there's no offset/cursor, and exceeding `maxFiles` returns 413. Use a higher cap or filter by `root=`.
+- **Don't paginate the file tree with maxFiles=1, maxFiles=2, …** — `files` has no offset or cursor (only `graph` is paginated), and exceeding `maxFiles` returns 413. Use a higher cap or filter by `root=`.
 - **Don't edit `wiki/**` behind the app's back.** Direct filesystem edits to wiki pages skip merge, ingest cache and file history, and do not trigger ingest; make the change in the desktop app. Adding files to `raw/sources/**` from outside is fine: the app's watcher sees them and queues ingest under the conditions of the "re-index" recipe.
 - **Don't include the token in URLs you echo / log / show.** Use headers in any output visible to the user.
 - **Don't retry blindly on 429 / 503** — back off explicitly (1s / 2s respectively).

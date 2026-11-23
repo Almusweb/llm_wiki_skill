@@ -333,9 +333,13 @@ Query params:
 |---|---|---|
 | `q` | — | Substring filter on `id` or `label`, case-insensitive. Filters **nodes**; edges are only those between matching nodes, so `q` does not return a node's neighbours. |
 | `nodeType` | — | Filter on the page's `type:` (first `type:` line, lowercased; `other` if none). Examples: `entity`, `concept`, `other`. Exact match: an unknown value returns 0 nodes; `node_type` (snake_case) is ignored. |
-| `limit` | `200` | Values above `1000` are clamped to `1000`; `0`, negative or non-numeric → 400. |
+| `limit` | `200` | Absent → `200`. A number above `1000` is clamped to `1000` (`5000` becomes `1000`); `0`, negative or non-numeric → 400. |
+| `offset` | — | 0.6.13+. Start of the page; use it with `limit` to read the next page while `hasMore` is true. |
+| `edgeScope` | `page` | 0.6.13+. `page`: an edge is returned only when both ends are nodes of the returned page. `filtered`: edges between the filtered nodes are returned, also when an end is outside the page. Any other value → 400. |
 
-Pages with `type: query` are **not** graph nodes (excluded on purpose, with their edges).
+`nodeType` is an open set derived from `type:`, not a fixed list; the examples above are not complete. Pages with `type: query` are **not** graph nodes (excluded on purpose, with their edges).
+
+Pagination applies to `graph` only: the `files` tree has no pagination.
 
 Response:
 
@@ -358,11 +362,17 @@ Response:
       "target": "attention",
       "weight": 1.0
     }
-  ]
+  ],
+  "offset": 0,
+  "limit": 200,
+  "totalCount": 120,
+  "hasMore": false
 }
 ```
 
-Edges are derived from `[[wikilink]]` references **and the frontmatter `related:` list** in `wiki/**/*.md`. Deduplicated by unordered pair `(source, target)` — `[[a]]` in b and `[[b]]` in a produce **one** edge. Self-edges are dropped. `weight` is `1.0`. Node `id` is the file stem, or the relative path when two pages share a stem; ambiguous links are dropped. The graph is rebuilt from the files on request and cached for 5 s, so a new page can take up to ~5 s to appear; there is no indexing state and embeddings play no part.
+`offset`, `limit`, `totalCount` and `hasMore` are the pagination fields of 0.6.13+. Read `hasMore` before requesting another page.
+
+Edges are derived from `[[wikilink]]` references **and the frontmatter `related:` list** in `wiki/**/*.md`. Deduplicated by unordered pair `(source, target)` — `[[a]]` in b and `[[b]]` in a produce **one** edge. Self-edges are dropped. `weight` is `1.0`. Node `id` is the file stem, or the relative path when two pages share a stem; ambiguous links are dropped. The graph is rebuilt from the files on request and the backend keeps a 5 s cache of it; there is no indexing state and embeddings play no part.
 
 `linkCount` is the node's degree in the deduped graph.
 
