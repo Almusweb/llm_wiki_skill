@@ -35,7 +35,7 @@ The skill is three markdown files and nothing else. Drop the folder anywhere you
 - "I just added new docs, re-index" → backend rescan (ingest itself is queued by the desktop UI, see `api-reference.md`)
 - "Give me a structural overview of my wiki" → file tree + index.md
 
-On 0.4.x everything is read-only except `sources/rescan`. On **0.6.13** reviews, `pages/write`, `pages/embed` and `chat` also change state or spend LLM calls: use them only after the user confirmed.
+Read-only by default. `sources/rescan` changes state. On **0.6.13** other POST, PATCH and DELETE routes exist and change state too: use them only when the user explicitly asks.
 
 ## Files
 
@@ -119,8 +119,8 @@ Add `| jq` at the end of any of these if you have `jq` installed and want pretty
 - Token-based auth is constant-time compared (no timing leak in the auth check).
 - Path traversal blocked at the route handler (`safe_join` with canonical-path prefix check).
 - File reads restricted to a whitelist (`purpose.md`, `schema.md`, `wiki/**`, `raw/sources/**`); text extensions only; 2 MB cap.
-- Body limit 1 MB (chat 40 MiB, `pages/write` ~12 MiB on 0.6.13); in-flight cap 64; rate limit 120/sec.
-- v1 had no write endpoints. **0.6.13 adds** review mutations, `pages/write`, `pages/embed` and an agent chat (see `api-reference.md` → "Additions in app 0.6.13").
+- Body limit 1 MB; in-flight cap 64; rate limit 120/sec.
+- v1 had no write endpoints. `/sources/rescan` changes state. On 0.6.13 other POST, PATCH and DELETE routes exist and change state too.
 
 What's **not** in the threat model:
 

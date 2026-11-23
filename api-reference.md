@@ -316,7 +316,7 @@ Query params:
 |---|---|---|
 | `q` | — | Substring filter on `id` or `label`, case-insensitive. Filters **nodes**; edges are only those between matching nodes, so `q` does not return a node's neighbours. |
 | `nodeType` | — | Filter on the page's `type:` (first `type:` line, lowercased; `other` if none). Examples: `entity`, `concept`, `other`. Exact match: an unknown value returns 0 nodes; `node_type` (snake_case) is ignored. |
-| `limit` | `200` | Clamped to `[1, 1000]`. |
+| `limit` | `200` | Values above `1000` are clamped to `1000`; `0`, negative or non-numeric → 400. |
 
 Pages with `type: query` are **not** graph nodes (excluded on purpose, with their edges).
 
@@ -406,7 +406,7 @@ project UUID, then `default`.
 
 ## POST /api/v1/projects/{id}/chat
 
-**0.4.x: returns 501.** On **0.6.13+** this is a real backend agent chat: see "Additions in app 0.6.13" below.
+**0.4.x: returns 501.** Chat / RAG pipeline lives in the WebView in v1. Don't invoke. Tell the user to use the desktop chat UI.
 
 ---
 
@@ -418,13 +418,13 @@ project UUID, then `default`.
 | File content read | 2 MiB | Exceed → 413. |
 | File-tree node count | 10000 hard cap | Exceed → 413. |
 | Search `topK` | 50 max | Silently clamped. |
-| Graph `limit` | 1000 max | Values above 1000 silently clamped. **0.6.13:** `0` or non-integer → 400 (see "GET /projects/{id}/graph (pagination)"). |
+| Graph `limit` | 1000 max | Values above 1000 silently clamped. `0`, negative or non-numeric → 400. |
 | Rate limit | 120 req/sec (global, sliding 1 s window; `/health` and OPTIONS excluded) | 429, **no `Retry-After` header** — back off ≥1s. |
 | In-flight requests | 64 concurrent | 503 "API server is busy" — back off ≥2s. |
 | Chat streams / page embeds | 8 / 4 concurrent | 503. |
 
 CORS (upstream v1 docs, **0.4.x only**): `Access-Control-Allow-Origin: *`. Preflight cached 10 min via `Access-Control-Max-Age: 600`. Allowed headers include `Authorization`, `X-LLM-Wiki-Token`, `Content-Type`.
-**0.6.13** (`src-tauri/src/cors.rs`): no `*`; the request `Origin` is reflected (with `Vary: Origin` and `Access-Control-Allow-Private-Network: true`) only for `http://localhost[:port]`, `http://127.0.0.1[:port]`, `http://[::1][:port]`, `chrome-extension://`, `moz-extension://` and the Tauri origins; other origins get no `Access-Control-Allow-Origin`. `Access-Control-Allow-Methods: GET, POST, PATCH, DELETE, OPTIONS`.
+**0.6.13** (`src-tauri/src/cors.rs`): no `*`; the request `Origin` is reflected in `Access-Control-Allow-Origin` only for local origins (`localhost`, `127.0.0.1`, `[::1]`), `chrome-extension://` and `moz-extension://` origins, and the Tauri origins (`tauri://localhost`, `http(s)://tauri.localhost`); for any other origin the header is absent. `Access-Control-Allow-Methods: GET, POST, PATCH, DELETE, OPTIONS`.
 Observed: reflected for `http://localhost:3000`, `http://127.0.0.1`, `http://[::1]:8080`, `chrome-extension://…`,
 `tauri://localhost`, `http://tauri.localhost`, also on 401 responses; not for `https://example.com`, `null` or
 `http://localhost.evil.com`. **The server still serves the request**: CORS only stops a browser from reading the
@@ -437,17 +437,6 @@ GET/POST/PATCH/DELETE/OPTIONS (e.g. `PUT`), after the auth check; a known route 
 ---
 
 ## Additions in app 0.6.13
-
-> Source: app code at tag `v0.6.13` (`src-tauri/src/api_server.rs` unless noted). Check `/health` → `version` before relying on these.
-
-### Common checks (in order)
-
-429 above 120 req/s (not `/health`, not OPTIONS) · 503 above 64 in-flight requests · OPTIONS → 204 ·
-400 "Request body too large" (1 MiB; **chat 40 MiB**; **pages/write 12 MiB + 16 KiB**) or non-UTF-8 body ·
-503 API disabled · 401 missing token · 405 method not in GET/POST/PATCH/DELETE · 404 unknown route.
-
-`POST chat`, `POST chat/{sessionId}/cancel`, `POST pages/write`, `POST pages/embed` **always** require the
-token, even with `allowUnauthenticated`. Review `PATCH`/`DELETE` do not.
 
 `/health` adds `mcpEnabled`, `allowLanAccess`, `agent: {chat, streaming, streamProtocol: "sse"}`.
 `allowLanAccess` reflects the setting; the bind address (`0.0.0.0` vs `127.0.0.1`) is read only when the server starts,
@@ -471,83 +460,6 @@ Fields are present only if stored: `resolvedAction` is absent on unresolved item
 missing. `sourcePath` is the **absolute** path of the source; `createdAt` is a JSON float (ms). The id is
 `review-` + FNV-1a 32-bit of `type::normalized title`, so the same review from a re-ingest merges into the existing
 item, and a resolved item stays resolved (`review-store.ts`). When the ingest queue drains, the app may resolve
-items by itself (`resolvedAction` `auto-resolved` or `llm-judged`) (`sweep-reviews.ts`). Types (`src/stores/review-store.ts`): `contradiction`, `duplicate`,
-`missing-page`, `confirm`, `suggestion`.
+items by itself (`resolvedAction` `auto-resolved` or `llm-judged`) (`sweep-reviews.ts`).
 
-### Review mutations (write `.llm-wiki/review.json`, no lock, mark-only)
-
-| Route | Body | Response | Errors |
-|---|---|---|---|
-| `POST reviews/resolve` | `{ "ids": [..] (alias reviewIds), "action"?: "..." }` | `{ resolved: [], notFound: [], count }`, always 200 | 400 invalid JSON / empty ids |
-| `PATCH reviews/{reviewId}` | `{ "resolved"?: true, "action"?: "..." }` (empty body = resolve) | `{ reviewId, resolved }` | 400, 404 not found |
-| `DELETE reviews/{reviewId}` | — | `{ reviewId, deleted: true }` | 404 |
-
-`resolved: false` reopens and clears `resolvedAction`. **Caveat:** the desktop UI keeps reviews in memory and rewrites
-the whole `review.json` about 1 s after each change of its own store (e.g. an ingest adding reviews); API edits become
-visible to the UI only after the Review tab's refresh. An API edit can therefore be overwritten. Treat it as a risk, not a rule. Re-list after a mutation to confirm.
-
-### POST /projects/{id}/pages/write
-
-Body (`deny_unknown_fields`): `{ "path": "wiki/...md", "content": "...", "allowOverwrite": false }`.
-Path: must start with `wiki/` and end with `.md`; no leading `/`, no `..`, no segment starting with `.`, no
-`<>:"|?*`, control chars, trailing space/dot or Windows reserved names. Content ≤ 2 MiB.
-
-```json
-{ "ok": true, "projectId": "...",
-  "result": { "path": "wiki/concepts/x.md", "bytes": 1234, "allowOverwrite": false, "verified": true, "existedBefore": false } }
-```
-
-Errors: 400 invalid JSON / unknown field / "path is required" / bad path / too large; **409 existing page without
-`allowOverwrite`**; 500 symlink, I/O, verification failure (previous content restored). Atomic write, byte-for-byte
-verification, file history (`baseline` + `agent` versions). Does **not** update `index.md`, `log.md`, embeddings,
-reviews or caches: keyword search sees the page at once, the graph within ~5 s, vectors only after `pages/embed`.
-
-### POST /projects/{id}/pages/embed
-
-Body: `{ "path": "wiki/...md", "force"?: false }`. Synchronous (provider timeout 300 s).
-
-```json
-{ "ok": true, "projectId": "...",
-  "result": { "path": "...", "pageId": "...", "revision": "sha256:...", "chunks": 4, "vectorsWritten": 4,
-              "status": "indexed" } }
-```
-
-`status` is `indexed` or `unchanged`. Errors: 400 "Embedding is not configured" / disabled / bad path / page over
-2 MiB / `index.md`, `log.md`, `overview.md` / over 512 chunks / empty; 404 page; 503 more than 4 running;
-502 provider; 504 timeout; 500 storage.
-
-### POST /projects/{id}/chat
-
-Body (camelCase, unknown fields ignored):
-
-| Field | Default | Notes |
-|---|---|---|
-| `message` | required | |
-| `sessionId` / `runId` | `api_<uuid>` / `run_<uuid>` | |
-| `mode` | `standard` | `fast` \| `standard` \| `deep` \| `local_first` |
-| `retrievalMode` | `standard` | `standard` \| `smart` \| `faithful` |
-| `tools` | `{wiki: true, web: false, anytxt: false}` | **nested**: top-level `wiki`/`web`/`anytxt` are ignored |
-| `topK` | 5 | clamped 1-10 |
-| `includeContent` | false | |
-| `history`, `historyExplicit` | — | without history the last 12 session messages are loaded |
-| `skills`, `skillMode` | —, `explicit` | project skills from `.llm-wiki/skills` |
-| `contextFiles`, `images`, `approvedShellCommands`, `shellCommand` | — | |
-| `stream` | — | `true` = SSE; absent → SSE if `Accept: text/event-stream` |
-| `persistSession` | true | |
-
-JSON response: `{ ok, projectId, sessionId, mode, message: {role: "assistant", content}, references: [{title, path,
-kind, snippet?, score?}], toolEvents: [{tool, status, detail?}], events: [], usage }`.
-Errors: 400 invalid JSON / "message is required"; **499 "Agent turn cancelled"**; 502 any other agent error.
-
-SSE: events `meta` `{projectId, sessionId, runId}`, `agent` `{type: agentStart | turnStart | toolStart | toolEnd |
-referenceAdded | fileChanged | messageDelta | error | userInputRequired | done, ...}`, terminal `done` | `cancelled` |
-`error`; `: keepalive` every 10 s; at most 8 concurrent streams (503). `agent` events may be dropped for slow
-clients, the terminal one is not.
-
-`POST chat/{sessionId}/cancel` (no body) → `{ ok: true, cancelled: bool, sessionId }`.
-
-### GET /projects/{id}/graph (pagination)
-
-`offset` ≥ 0 (else 400); `edgeScope` = `page` (default: edges with both ends in the page) | `filtered` (source in
-the page, target among all filtered nodes); `limit` 0 or non-integer → 400 "limit must be a positive integer".
-Response adds `offset`, `limit`, `totalCount`, `hasMore`.
+The desktop UI keeps reviews in memory and rewrites the whole `review.json` about 1 s after each change of its own store (e.g. an ingest adding reviews).

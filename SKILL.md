@@ -1,6 +1,6 @@
 ---
 name: llm-wiki
-description: "Query the user's LLM Wiki knowledge base (the LLM Wiki desktop app at 127.0.0.1:19828 — NOT Obsidian, Notion, Apple Notes, Logseq, or any other PKM tool). Trigger ONLY when the user explicitly names LLM Wiki, says 'my wiki', 'my 知识库 / 知识库 / knowledge base', or asks things like 'what does my wiki say about X', 'read wiki page Y', 'show my wiki graph / 知识图谱', 'search in my LLM Wiki project', 'rescan my wiki sources / 重新索引', or names a wiki project by ID. DO NOT trigger on generic 'search my notes', 'find in my notebook', 'check my Obsidian', etc. — those belong to other tools the user may have installed. Covers wiki page search, file listing, content read, knowledge graph navigation, and source rescan against the running LLM Wiki desktop app. Read-only by default; app 0.6.13+ also exposes review management, page write/embed and an agent chat, to be used only with explicit user confirmation."
+description: "Query the user's LLM Wiki knowledge base (the LLM Wiki desktop app at 127.0.0.1:19828 — NOT Obsidian, Notion, Apple Notes, Logseq, or any other PKM tool). Trigger ONLY when the user explicitly names LLM Wiki, says 'my wiki', 'my 知识库 / 知识库 / knowledge base', or asks things like 'what does my wiki say about X', 'read wiki page Y', 'show my wiki graph / 知识图谱', 'search in my LLM Wiki project', 'rescan my wiki sources / 重新索引', or names a wiki project by ID. DO NOT trigger on generic 'search my notes', 'find in my notebook', 'check my Obsidian', etc. — those belong to other tools the user may have installed. Covers wiki page search, file listing, content read, knowledge graph navigation, and source rescan against the running LLM Wiki desktop app. Read-only by default, writes only on the user's explicit request."
 ---
 
 # LLM Wiki Local API Skill
@@ -169,12 +169,7 @@ For "I added new docs" requests:
 | POST | `/api/v1/projects/{id}/search` | Body: `{ "query": "...", "topK": 10, "includeContent": false }` (`limit` is ignored). Keyword + one-hop graph candidates, plus vectors when embeddings are configured; see "Reading the score". Response: `mode`, `tokenHits`, `vectorHits`, `graphHits`, `results`. `content` is absent (not `null`) unless `includeContent: true`. Empty query → 400. |
 | GET | `/api/v1/projects/{id}/graph?q=&nodeType=&limit=200&offset=0&edgeScope=page` | Graph from `wiki/**/*.md` wikilinks and `related:`. `limit` 1–1000 (larger is clamped, 0/negative → 400). **0.6.13+:** `offset` (≥ 0) and `edgeScope` (`page` \| `filtered`) for pagination; response adds `offset`, `limit`, `totalCount`, `hasMore`. |
 | POST | `/api/v1/projects/{id}/sources/rescan` | Triggers a backend rescan using the user's Source Watch config. Returns post-rescan queue + changed tasks. Does **not** itself queue ingest: see `api-reference.md`. |
-| POST | `/api/v1/projects/{id}/chat` | **0.4.x: 501. 0.6.13+: backend agent chat** (JSON or SSE stream), always requires the token, consumes the app's LLM calls. See `api-reference.md`. |
-| POST | `/api/v1/projects/{id}/chat/{sessionId}/cancel` | **0.6.13+.** Cancels a running chat turn. |
-| GET | `/api/v1/projects/{id}/reviews?status=unresolved&type=&limit=200` | **0.6.13+.** Review tab items (read). |
-| POST / PATCH / DELETE | `/api/v1/projects/{id}/reviews/resolve`, `/reviews/{reviewId}` | **0.6.13+. Mutates `review.json`.** Mark-only: never performs the UI side effects (e.g. creating the missing page). |
-| POST | `/api/v1/projects/{id}/pages/write` | **0.6.13+. Writes a page under `wiki/`.** Create-only unless `allowOverwrite: true`; verified, with file history. Always requires the token. |
-| POST | `/api/v1/projects/{id}/pages/embed` | **0.6.13+.** (Re)indexes one page in the vector store; needs embeddings configured. Always requires the token. |
+| POST | `/api/v1/projects/{id}/chat` | **0.4.x: 501** — not implemented. Don't call. |
 
 `{id}` accepts a UUID, an absolute filesystem path (URL-encoded), or the literal string `current`.
 
@@ -191,11 +186,9 @@ Always treat the status code as the contract:
 | 404 | Not found | Unknown project id, unknown route, **or a known route with the wrong verb** (e.g. `GET .../search`). On unknown project, list projects first to recover. |
 | 405 | Method not allowed | Only for verbs outside GET/POST/PATCH/DELETE/OPTIONS (e.g. `PUT`). |
 | 413 | Payload too large | File > 2 MB, file tree > maxFiles, or request body > 1 MB. Suggest narrower scope. |
-| 409 | Conflict | **0.6.13+** `pages/write` on an existing page without `allowOverwrite`. Read the page first, decide with the user. |
 | 415 | Unsupported media | Binary or non-UTF-8 file content. API is text-only. |
 | 429 | Too many requests | Rate limit (120 req in a sliding 1 s window, global; `/health` and `OPTIONS` excluded). No `Retry-After` header. Back off ≥1 second. |
 | 500 | Internal error | Log + report; don't loop. |
-| 499 | Cancelled | **0.6.13+** chat turn cancelled. |
 | 501 | Not implemented | `/chat` stub on 0.4.x. Don't retry. |
 | 503 | Service unavailable | API toggled off (`error` contains "disabled"); in-flight cap (64) reached ("busy"); on 0.6.13 also more than 8 chat streams or more than 4 page embeds running. Back off ≥2s. |
 
@@ -204,7 +197,7 @@ If the HTTP call itself fails (connection refused / ENOTFOUND): the desktop app 
 ## Etiquette
 
 - **Cite paths.** When you answer using wiki content, name the page: `(from wiki/concepts/rope.md)`. The user uses these to verify and to jump in-app.
-- **Stay read-only by default.** On 0.4.x only `sources/rescan` mutates state. On 0.6.13+ reviews, `pages/write`, `pages/embed` and `chat` also change state or spend LLM calls: call them only after the user explicitly confirmed that specific change. Check `/health` → `version` before assuming they exist.
+- **Stay read-only by default.** `sources/rescan` changes state. On 0.6.13 other POST, PATCH and DELETE routes exist and change state too: call them only after the user explicitly asked for that change.
 - **Don't dump full pages unless asked.** Snippet + path is usually enough. Pull full content only when reasoning genuinely needs it.
 - **Respect the project boundary.** The current project is the user's active context. Do not silently switch projects.
 - **Honor the rate limit.** 120 req/sec is plenty for sequential work, but parallel page reads can burst close to it. Batch where the API allows (`includeContent: true` on search avoids N+1 reads).

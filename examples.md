@@ -157,8 +157,7 @@ curl -s -X POST -H "Authorization: Bearer $TOKEN" \
   "$BASE/api/v1/projects/$PROJECT_ID/sources/rescan"
 ```
 
-Often no rescan is needed: with the project open, the app's watcher picks up files written into `raw/sources/` within
-seconds.
+Often no rescan is needed: with the project open, the app's watcher picks up files written into `raw/sources/`.
 
 If `changedTasks` is empty:
 
@@ -277,9 +276,9 @@ The desktop UI's active project does **not** change just because you used a diff
 
 ## Anti-patterns
 
-- **Don't `POST /chat` casually** — on 0.4.x it returns 501; on 0.6.13 it is a real agent chat that spends the app's LLM calls (`/health` → `agent.chat: true`). Use it only after the user confirmed.
+- **Don't `POST /chat`** — on 0.4.x it returns 501 (on 0.6.13 `/health` reports `agent.chat: true`). Use the desktop chat UI, or call your own LLM with the wiki content as context.
 - **Don't paginate the file tree with maxFiles=1, maxFiles=2, …** — there's no offset/cursor, and exceeding `maxFiles` returns 413. Use a higher cap or filter by `root=`.
-- **Don't edit `wiki/**` behind the app's back.** Direct filesystem edits to wiki pages skip merge, ingest cache and file history, and do not trigger ingest; on 0.6.13 use `pages/write` (with user confirmation). Adding files to `raw/sources/**` from outside is fine: the app's watcher sees them and queues ingest under the conditions of the "re-index" recipe.
+- **Don't edit `wiki/**` behind the app's back.** Direct filesystem edits to wiki pages skip merge, ingest cache and file history, and do not trigger ingest; make the change in the desktop app. Adding files to `raw/sources/**` from outside is fine: the app's watcher sees them and queues ingest under the conditions of the "re-index" recipe.
 - **Don't include the token in URLs you echo / log / show.** Use headers in any output visible to the user.
 - **Don't retry blindly on 429 / 503** — back off explicitly (1s / 2s respectively).
 - **Don't shell out to a wrapper script.** The API is the contract. Direct `curl` / `fetch` is the interface.
